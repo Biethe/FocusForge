@@ -45,9 +45,18 @@ class ProbeActivity : Activity() {
             text = "Share probe JSON"
             setOnClickListener { shareJson() }
         }
+        val cameraButton = Button(this).apply {
+            text = "Open camera probe"
+            setOnClickListener {
+                startActivity(Intent(this@ProbeActivity, CameraActivity::class.java))
+            }
+        }
         setContentView(ScrollView(this).apply {
             addView(LinearLayout(context).apply {
                 orientation = LinearLayout.VERTICAL
+                addView(cameraButton, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply {
+                    setMargins(pad, pad, pad, 0)
+                })
                 addView(shareButton, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply {
                     setMargins(pad, pad, pad, 0)
                 })

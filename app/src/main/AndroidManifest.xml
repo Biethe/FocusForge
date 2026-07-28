@@ -1,7 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- PRIVACY RULE (CLAUDE.md §4.3): this manifest must NEVER declare the INTERNET
-     permission. There are intentionally no <uses-permission> entries at all. -->
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+     permission. CAMERA is the only permission this app will ever hold; frames are
+     processed in memory and discarded. CI fails the build if anything else appears. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera.front" android:required="true" />
+
+    <!-- MediaPipe's library manifest requests these; we forcibly strip them from the
+         merged APK. The privacy rule is absolute: this app can never touch the network. -->
+    <uses-permission android:name="android.permission.INTERNET" tools:node="remove" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" tools:node="remove" />
 
     <application
         android:label="FocusForge"
@@ -17,5 +27,11 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <activity
+            android:name=".CameraActivity"
+            android:label="FocusForge — Camera"
+            android:screenOrientation="portrait"
+            android:exported="false" />
     </application>
 </manifest>

@@ -37,6 +37,14 @@ runs — always log `/proc/cpuinfo` with every benchmark.
 
 The contrast between these two devices IS the story: one codebase that probes its silicon at
 runtime and adapts (model size, kernels, threading) across seven years of Arm CPUs.
+- Big cluster = cores 6-7 (A73 @ 1.56 GHz); little cluster = cores 0-5 (A53 @ 1.35 GHz).
+  Use these exact core IDs for Phase 6 thread affinity.
+- Features confirmed: fp asimd aes sha1 sha2 crc32 ONLY. Armv8.0-A baseline:
+  no dotprod, no i8mm, no SVE, no LSE atomics, no fp16 arithmetic (no fphp/asimdhp).
+- HARD RULE: all native code, llama.cpp included, compiles with -march=armv8-a baseline.
+  Never copy armv8.2+/dotprod/i8mm flags from llama.cpp Android examples — they SIGILL
+  on this device. Verify the LLM actually runs on-device before Phase 5 is "done".
+- Usable RAM is 2.68 GiB. RSS budget ≤700 MB hard, ≤600 MB target.
 
 ## 3. Architecture (fixed — do not restructure without architect approval)
 

@@ -27,13 +27,21 @@ jobs:
       - name: Build debug APK
         run: ./gradlew assembleDebug --no-daemon
 
-      - name: Verify no INTERNET permission (privacy rule)
+      - name: Verify permissions (privacy rule — CAMERA only, INTERNET forbidden forever)
         run: |
           PERMS=$("$ANDROID_HOME"/build-tools/34.0.0/aapt2 dump permissions \
             app/build/outputs/apk/debug/app-debug.apk)
           echo "$PERMS"
-          if echo "$PERMS" | grep -qi "permission"; then
-            echo "::error::APK declares permissions — privacy rule forbids this in Phase 1"
+          # Allowed: CAMERA + the androidx-generated app-private receiver permission.
+          UNEXPECTED=$(echo "$PERMS" | grep "^uses-permission" \
+            | grep -v "android.permission.CAMERA" \
+            | grep -v "com.focusforge.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION" || true)
+          if [ -n "$UNEXPECTED" ]; then
+            echo "::error::Unexpected permissions in APK: $UNEXPECTED"
+            exit 1
+          fi
+          if echo "$PERMS" | grep -qi "INTERNET"; then
+            echo "::error::INTERNET permission found — hard privacy rule violated"
             exit 1
           fi
 

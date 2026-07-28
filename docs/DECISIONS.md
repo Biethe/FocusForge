@@ -5,6 +5,31 @@
 > Every optimization gets before/after numbers from committed benchmark files —
 > negative results are kept and reported honestly.
 
+## 2026-07-28 — Phase 2: CameraX + MediaPipe FaceLandmarker
+
+- **What/License:** androidx.camera (core/camera2/lifecycle/view) 1.3.4 (Apache-2.0),
+  androidx.activity 1.9.0 (Apache-2.0), com.google.mediapipe:tasks-vision 0.10.14
+  (Apache-2.0). Model: face_landmarker.task float16, pinned URL version /1/, fetched at
+  build time by the :app:downloadModels gradle task or scripts/get_models.sh — never
+  committed (3.76 MB, bundled as an asset so the app needs no network at runtime).
+- **Why:** locked technology choices per CLAUDE.md §3. CPU delegate (default) — the GPU
+  delegate on the A20e's Mali-G71 MP2 is untested and our story is CPU optimization.
+
+## 2026-07-28 — Phase 2: MediaPipe's INTERNET permission stripped at merge time
+
+- **What:** tasks-vision's library manifest injects INTERNET + ACCESS_NETWORK_STATE into
+  the merged APK. We remove both with `tools:node="remove"` in our manifest; CI now fails
+  the build if any permission beyond CAMERA (+ the androidx app-private
+  DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION, which grants no capability) appears.
+- **Why:** privacy rule is absolute. Verified locally with aapt2: INTERNET is gone.
+
+## 2026-07-28 — Phase 2: APK size 2.3 MB → 32 MB
+
+- **What:** the debug APK grew to 32 MB, almost entirely MediaPipe's
+  libmediapipe_tasks_vision_jni.so (arm64) + the bundled 3.76 MB model.
+- **Why accepted:** it is the locked landmark stack; no smaller official build exists.
+  Recorded honestly — this is our vision-stack size baseline for the optimization story.
+
 ## 2026-07-28 — Phase 1: zero-dependency Probe app
 
 - **What:** The Probe screen is plain Kotlin `android.app.Activity` with programmatic views —
