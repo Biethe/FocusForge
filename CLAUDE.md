@@ -5,7 +5,7 @@
 > The human operator is NOT an Android or ML expert. The architect (a separate Claude chat) wrote
 > this file and reviews progress via `docs/PROGRESS.md`. You are the builder.
 
-**STATUS: Phase 0 — not started.** (Update this line at the end of every session.)
+**STATUS: Phase 0 complete (2026-07-28). Next: Phase 1 — walking-skeleton APK + silicon probe.** (Update this line at the end of every session.)
 
 ## 1. What we are building
 
