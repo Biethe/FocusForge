@@ -5,6 +5,45 @@
 > "operator confirmed: &lt;what was seen&gt;". If something is not measured yet, it says
 > `NOT MEASURED YET`.
 
+## 2026-07-28 — Phase 1: Walking-skeleton APK + silicon probe
+
+**Did**
+- Built the first installable app. One screen ("Probe") that shows, refreshed every second:
+  phone model, Android version, supported ABIs, CPU core count grouped into clusters by their
+  max frequency, the raw CPU Features line with a clear YES/NO verdict for `asimddp` and
+  `i8mm`, total RAM, and thermal status (on Android 10+). A "Share probe JSON" button exports
+  everything through the normal Android share menu.
+- Kept it deliberately tiny: no libraries at all beyond the Kotlin standard one. The APK is
+  **2.3 MB** (the red-flag line was 30 MB). The manifest declares **zero permissions** — CI
+  now fails the build if any permission ever sneaks in.
+- CI now really builds the APK on every push and publishes it to a rolling "dev-latest"
+  pre-release so the operator can download it straight from the phone's browser.
+- Installed a local build toolchain on the PC (JDK 17, Gradle 8.7, Android SDK 34 in the
+  home folder) so compile errors are caught before pushing; CI remains the official builder.
+
+**Evidence**
+- Green CI run (both jobs): https://github.com/Biethe/FocusForge/actions/runs/30367768698
+- APK download page: https://github.com/Biethe/FocusForge/releases/tag/dev-latest
+- The same CI run's log ("Verify no INTERNET permission" step) shows the aapt2 permissions
+  dump containing no permission lines.
+- On-phone numbers (clusters, features, RAM as the A20e reports them): NOT MEASURED YET —
+  waiting for operator to install and share the probe JSON.
+
+**Next**
+- Operator installs the APK on the A20e, checks 8 cores / 2 clusters and NO asimddp/i8mm,
+  and shares the probe JSON to the architect chat. Then Phase 2: CameraX + MediaPipe
+  FaceLandmarker with the perf HUD.
+
+**Risks**
+- Sideloading warnings (Play Protect) can look scary — instructions below explain exactly
+  what to expect so nothing is tapped in panic.
+- Thermal status needs Android 10+; if the A20e is still on Android 9 the app will say so
+  honestly rather than show a number.
+- The probe reads `/sys/.../cpuinfo_max_freq`; a few devices block this. The app shows
+  "?" instead of guessing if that happens — report it if you see it.
+
+---
+
 ## 2026-07-28 — Phase 0: Repo and rails
 
 **Did**
