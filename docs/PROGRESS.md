@@ -33,8 +33,11 @@
   rule in CLAUDE.md.
 
 **Evidence**
-- Green CI run (three jobs incl. the new `core-tests` on `ubuntu-24.04-arm`):
-  LINK PENDING — filled in below once the run for this commit finishes.
+- Green CI run, all three jobs (`build-apk`, `core-tests`, `arm-probe`):
+  https://github.com/Biethe/FocusForge/actions/runs/30377142620 — the `core-tests` job runs
+  on `ubuntu-24.04-arm` and its log opens by printing that runner's CPU Features line
+  (`asimddp`, `i8mm`, `sve2` — the modern-Arm half of our two-device story), then the test
+  results, then "Only :core was built on this runner, as required."
 - **60 tests pass, 4 skip.** The 4 skipped ones are the replay assertions over the
   operator's real recordings; they report `NOT MEASURED YET` and will not pass on invented
   data. Their output is in the `core-test-report` artifact of that run.
