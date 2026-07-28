@@ -5,6 +5,73 @@
 > "operator confirmed: &lt;what was seen&gt;". If something is not measured yet, it says
 > `NOT MEASURED YET`.
 
+## 2026-07-28 — Phase 3: Signals in :core + replay tests
+
+**Did**
+- Built the `:core` module: pure Kotlin, zero Android code, so the same maths runs on the
+  phone and on a plain computer. It turns raw face numbers into meaning: how closed the
+  eyes are, blinks and blink rate, **PERCLOS** (the share of the last minute the eyes were
+  at least 80% shut — the standard drowsiness measure), long eye closures, whether you are
+  looking at the screen, how steady your head is, and yawns.
+- Everything is explained in plain language in **docs/SIGNALS.md**, including every single
+  threshold and *why* it has the value it has, plus the exact recording protocol.
+- The app learns **your own** neutral head position in the first 5 seconds of a session,
+  because "facing the screen" depends entirely on where the phone sits on its stand. All
+  gaze thresholds are measured from that, not from an assumed straight-ahead.
+- Everything is measured in **time, not frames**. This matters: Phase 6 will deliberately
+  slow the camera down to save battery, and without this, our own optimisation would have
+  changed our own measurements.
+- Added a **recorder** to the Camera screen: pick a label (focused / distracted / drowsy),
+  tap REC, and it saves 2 minutes of *numbers only* — no video, no images, no way to
+  reconstruct a face — then stops itself automatically. A Share button sends the file off
+  the phone. Added a **live signals panel** showing every value as it happens.
+- Tightened privacy further: of MediaPipe's 52 facial values we now keep only 13 (eyes and
+  jaw); of its 478 face points, 14. The rest are discarded before they reach memory. That
+  turns "we do not do emotion recognition" into a fact about the code.
+- New CI job **core-tests** running on GitHub's Arm machine. It runs `:core` only — the job
+  actively fails if the Android part of the build sneaks onto that machine, which is a
+  rule in CLAUDE.md.
+
+**Evidence**
+- Green CI run (three jobs incl. the new `core-tests` on `ubuntu-24.04-arm`):
+  LINK PENDING — filled in below once the run for this commit finishes.
+- **60 tests pass, 4 skip.** The 4 skipped ones are the replay assertions over the
+  operator's real recordings; they report `NOT MEASURED YET` and will not pass on invented
+  data. Their output is in the `core-test-report` artifact of that run.
+- The 60 passing tests include: blink hysteresis (a wobbling score must not emit fake
+  blinks), PERCLOS unchanged between 30 fps and 5 fps, PERCLOS with a missing face,
+  the head-pose matrix layout, calibration against an outlier, and ordering assertions
+  over three *generated* streams (synthetic PERCLOS focused=0.040 vs drowsy=0.188;
+  gaze-on-screen focused=0.960 vs distracted=0.385 — printed in the CI log).
+- A real bug the tests caught and we fixed: the first version assumed reading the head
+  matrix the "wrong way round" only flipped signs. It does not — 20.0° read back as 17.9°.
+  We now detect the layout from the data instead. See docs/DECISIONS.md.
+- New APK on the rolling release: https://github.com/Biethe/FocusForge/releases/tag/dev-latest
+  (33 MB, was 32 MB — the +1 MB is the JSON library). Permissions still CAMERA only.
+- On-phone signal behaviour: NOT MEASURED YET — operator does the recordings next.
+- Phase 2 HUD numbers (fps / inference ms / RSS): still NOT MEASURED YET.
+
+**Next**
+- Operator: install the new APK, watch the signals panel (close your eyes → PERCLOS climbs;
+  look away → gaze flips to OFF), then make the three 2-minute recordings following
+  docs/SIGNALS.md §12 and send the files back. Once they are committed, the 4 skipped tests
+  turn into real assertions and Phase 3 is fully closed.
+- Then Phase 4: fuse these signals into one 0–100 focus score with a session screen.
+
+**Risks**
+- The recordings are the gate. Until they exist we have proven the pipeline separates the
+  three behaviours on data we generated ourselves — not on a real face. That is a genuine
+  gap and it is marked as such rather than papered over.
+- If MediaPipe's blink scores turn out to be weak on the A20e's fixed-focus front camera,
+  the eye-aspect-ratio fallback takes over automatically, but its two reference values are
+  literature typicals, not calibrated to the operator. If the recordings show that, we
+  calibrate them per-user in Phase 4.
+- Gaze uses head direction plus horizontal eye position only. Deliberately no vertical eye
+  tracking: at 640×480 and desk distance that number would be noise. Looking up and down is
+  caught by head pitch, which is fine for a phone on a stand but would not be for glasses.
+
+---
+
 ## 2026-07-28 — Phase 2: Camera + face landmarks + perf HUD
 
 **Did**

@@ -1,6 +1,7 @@
 import java.net.URI
 
 plugins {
+    // Versions come from settings.gradle.kts (pluginManagement.plugins).
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
 }
@@ -13,8 +14,8 @@ android {
         applicationId = "com.focusforge"
         minSdk = 28
         targetSdk = 34
-        versionCode = 2
-        versionName = "0.2.0-phase2"
+        versionCode = 3
+        versionName = "0.3.0-phase3"
         ndk {
             // A20e is arm64-v8a only per CLAUDE.md; we never ship other ABIs.
             abiFilters += "arm64-v8a"
@@ -39,6 +40,11 @@ android {
         }
     }
 
+    buildFeatures {
+        // Recordings carry the app version that produced them.
+        buildConfig = true
+    }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
@@ -50,6 +56,8 @@ android {
 
 // Every dependency has a docs/DECISIONS.md entry with its license (MIT/Apache-2.0/BSD only).
 dependencies {
+    // All signal logic lives in the pure-Kotlin :core module (CLAUDE.md §3).
+    implementation(project(":core"))
     // CameraX (Apache-2.0)
     val camerax = "1.3.4"
     implementation("androidx.camera:camera-core:$camerax")

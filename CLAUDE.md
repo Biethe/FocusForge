@@ -5,7 +5,7 @@
 > The human operator is NOT an Android or ML expert. The architect (a separate Claude chat) wrote
 > this file and reviews progress via `docs/PROGRESS.md`. You are the builder.
 
-**STATUS: Phase 2 code complete + CI green (2026-07-28); awaiting operator on-phone check + HUD baseline numbers. Next: Phase 3 — signals in :core + replay tests.** (Update this line at the end of every session.)
+**STATUS: Phase 3 code complete + CI green (2026-07-28) — :core signals, 60 tests pass on the arm64 runner, recorder + live signals view in the app. Awaiting operator: Phase 2 HUD numbers, and the three labelled 2-minute recordings (docs/SIGNALS.md §12) that turn the 4 skipped replay assertions into real ones. Next: Phase 4 — focus score + session dashboard.** (Update this line at the end of every session.)
 
 ## 1. What we are building
 

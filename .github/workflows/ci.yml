@@ -67,6 +67,49 @@ jobs:
             Sideload install — expect a Play Protect warning, see README/PROGRESS.
           files: focusforge-debug.apk
 
+  # CI split rule (CLAUDE.md §4.4): performance and signal work runs on Arm silicon.
+  # `-PcoreOnly` drops :app from the Gradle build, so the Android SDK is never needed here
+  # and never installed. :core is pure Kotlin/JVM by design, which is what makes this possible.
+  core-tests:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: gradle/actions/setup-gradle@v3
+
+      - name: Record the silicon these numbers were produced on
+        run: |
+          echo "=== uname ==="; uname -a
+          echo "=== /proc/cpuinfo (Features line) ==="; grep -m1 Features /proc/cpuinfo || true
+
+      - name: Run :core signal tests (unit + replay)
+        run: ./gradlew -PcoreOnly :core:test --no-daemon
+
+      - name: Prove no Android project was built here (CI split rule)
+        run: |
+          ./gradlew -PcoreOnly projects --no-daemon | tee projects.txt
+          if grep -q "Project ':app'" projects.txt; then
+            echo "::error:::app is part of the arm64 build — CI split rule violated"
+            exit 1
+          fi
+          if [ -d app/build ]; then
+            echo "::error::app/build was produced on the arm64 runner"
+            exit 1
+          fi
+          echo "Only :core was built on this runner, as required."
+
+      - name: Upload test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: core-test-report
+          path: core/build/reports/tests/test/
+
   arm-probe:
     runs-on: ubuntu-24.04-arm
     steps:

@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The only thing the app ever shares as a file: landmark recordings (numbers, no video). -->
+<paths>
+    <external-files-path name="replays" path="replays/" />
+</paths>
