@@ -1,0 +1,36 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  placeholder-build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Placeholder
+        run: echo "ok — real APK build lands in Phase 1"
+
+  arm-probe:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - name: Probe Arm silicon
+        run: |
+          {
+            echo "=== date (UTC) ==="
+            date -u
+            echo
+            echo "=== lscpu ==="
+            lscpu
+            echo
+            echo "=== /proc/cpuinfo ==="
+            cat /proc/cpuinfo
+          } | tee probe-ci.txt
+
+      - name: Upload probe artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: probe-ci
+          path: probe-ci.txt

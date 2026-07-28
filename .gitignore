@@ -1,0 +1,37 @@
+# --- Model weights are NEVER committed (privacy + license rule) ---
+models/
+*.gguf
+*.task
+*.tflite
+
+# --- Android / Gradle ---
+*.apk
+*.aab
+*.ap_
+*.dex
+.gradle/
+build/
+captures/
+local.properties
+*.keystore
+*.jks
+
+# --- Android Studio / IntelliJ ---
+.idea/
+*.iml
+.navigation/
+
+# --- Native build output ---
+.cxx/
+obj/
+*.o
+*.so
+
+# --- Kotlin/JVM ---
+*.class
+*.log
+*.hprof
+
+# --- OS noise ---
+.DS_Store
+Thumbs.db
