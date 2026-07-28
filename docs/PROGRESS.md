@@ -5,6 +5,46 @@
 > "operator confirmed: &lt;what was seen&gt;". If something is not measured yet, it says
 > `NOT MEASURED YET`.
 
+## 2026-07-28 — Phase 2: Camera + face landmarks + perf HUD
+
+**Did**
+- Added the "Camera" screen (opened by a new button on the Probe screen): the front camera
+  runs at 640×480 and every frame goes through MediaPipe's FaceLandmarker, which finds 478
+  face points plus "blendshapes" (eye-open/eye-closed style values we'll use in Phase 3).
+  The points are drawn live over the camera preview in green.
+- Added the always-on performance HUD at the top of that screen: camera frames per second,
+  average landmark-detection time in milliseconds, and app memory (RSS) in MB. The bottom
+  of the screen shows the last 8 one-per-second samples with timestamps — screenshot that
+  area for the record. The same lines also go to the Android debug log.
+- The AI model file (3.76 MB) is downloaded automatically when the app is built — on the PC,
+  in CI, or via scripts/get_models.sh — and is never committed to git. It ships inside the
+  APK, so the phone never needs a network connection.
+- Caught and fixed a privacy-rule violation: the MediaPipe library tried to add INTERNET
+  and network-state permissions to our app. They are now forcibly stripped, and CI fails
+  any build whose APK contains a permission other than CAMERA.
+
+**Evidence**
+- Green CI run: https://github.com/Biethe/FocusForge/actions/runs/30371328429 — its
+  "Verify permissions" step prints the full permission dump (CAMERA only, no INTERNET).
+- New APK on the rolling release: https://github.com/Biethe/FocusForge/releases/tag/dev-latest
+- Dependency licenses + the INTERNET-stripping and APK-size decisions: docs/DECISIONS.md.
+- APK size is now 32 MB (was 2.3 MB) — almost entirely MediaPipe's native library + model;
+  recorded honestly as our vision-stack baseline.
+- On-phone fps / inference ms / RSS: NOT MEASURED YET — operator runs it next.
+
+**Next**
+- Operator: update the app, grant camera permission, check the mesh sticks to the face,
+  write down the HUD numbers (fps, ms, RSS) and screenshot them — that's our vision
+  baseline for the optimization story. Then Phase 3: signals in :core + replay tests.
+
+**Risks**
+- MediaPipe on the A20e's CPU is untested; if fps is well below 8 or inference far above
+  ~100 ms, that becomes the first optimization target (it's a finding, not a failure).
+- The landmark overlay math assumes portrait orientation (the screen is locked to
+  portrait on purpose); if points look offset, report it with a screenshot.
+
+---
+
 ## 2026-07-28 — Phase 1: Walking-skeleton APK + silicon probe
 
 **Did**

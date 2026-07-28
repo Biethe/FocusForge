@@ -5,7 +5,7 @@
 > The human operator is NOT an Android or ML expert. The architect (a separate Claude chat) wrote
 > this file and reviews progress via `docs/PROGRESS.md`. You are the builder.
 
-**STATUS: Phase 1 code complete + CI green (2026-07-28); awaiting operator install + probe JSON from the A20e. Next: Phase 2 — camera + face landmarks.** (Update this line at the end of every session.)
+**STATUS: Phase 2 code complete + CI green (2026-07-28); awaiting operator on-phone check + HUD baseline numbers. Next: Phase 3 — signals in :core + replay tests.** (Update this line at the end of every session.)
 
 ## 1. What we are building
 
