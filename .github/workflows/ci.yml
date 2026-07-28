@@ -7,11 +7,57 @@ on:
   workflow_dispatch:
 
 jobs:
-  placeholder-build:
+  # CI split rule (CLAUDE.md §4.4): APKs are built on x64; the NDK cross-compiles
+  # arm64 native code here in later phases. Never install the Android SDK on the
+  # arm64 runner.
+  build-apk:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
-      - name: Placeholder
-        run: echo "ok — real APK build lands in Phase 1"
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: gradle/actions/setup-gradle@v3
+
+      - name: Build debug APK
+        run: ./gradlew assembleDebug --no-daemon
+
+      - name: Verify no INTERNET permission (privacy rule)
+        run: |
+          PERMS=$("$ANDROID_HOME"/build-tools/34.0.0/aapt2 dump permissions \
+            app/build/outputs/apk/debug/app-debug.apk)
+          echo "$PERMS"
+          if echo "$PERMS" | grep -qi "permission"; then
+            echo "::error::APK declares permissions — privacy rule forbids this in Phase 1"
+            exit 1
+          fi
+
+      - name: Rename APK
+        run: cp app/build/outputs/apk/debug/app-debug.apk focusforge-debug.apk
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: focusforge-debug-apk
+          path: focusforge-debug.apk
+
+      - name: Publish rolling dev-latest pre-release
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: dev-latest
+          name: "Dev build (rolling — always the newest main)"
+          prerelease: true
+          body: |
+            Rolling debug build of the latest `main` commit (${{ github.sha }}).
+            Download `focusforge-debug.apk` below directly on the phone's browser.
+            Sideload install — expect a Play Protect warning, see README/PROGRESS.
+          files: focusforge-debug.apk
 
   arm-probe:
     runs-on: ubuntu-24.04-arm

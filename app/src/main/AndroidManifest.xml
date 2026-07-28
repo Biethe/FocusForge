@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- PRIVACY RULE (CLAUDE.md §4.3): this manifest must NEVER declare the INTERNET
+     permission. There are intentionally no <uses-permission> entries at all. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <application
+        android:label="FocusForge"
+        android:theme="@android:style/Theme.Material.Light.DarkActionBar"
+        android:allowBackup="false">
+
+        <activity
+            android:name=".ProbeActivity"
+            android:label="FocusForge — Probe"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>
