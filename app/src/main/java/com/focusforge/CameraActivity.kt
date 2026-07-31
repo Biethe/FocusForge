@@ -2,9 +2,7 @@ package com.focusforge
 
 import android.Manifest
 import android.content.pm.PackageManager
-import android.graphics.Bitmap
 import android.graphics.Color
-import android.graphics.Matrix
 import android.graphics.Typeface
 import android.os.Build
 import android.os.Bundle
@@ -12,7 +10,6 @@ import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import android.util.Log
-import android.util.Size
 import android.view.Gravity
 import android.view.WindowManager
 import android.widget.Button
@@ -21,13 +18,6 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.ComponentActivity
-import androidx.camera.core.CameraSelector
-import androidx.camera.core.ImageAnalysis
-import androidx.camera.core.ImageProxy
-import androidx.camera.core.Preview
-import androidx.camera.core.resolutionselector.ResolutionSelector
-import androidx.camera.core.resolutionselector.ResolutionStrategy
-import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.core.content.ContextCompat
 import com.focusforge.core.Blendshapes
@@ -36,10 +26,6 @@ import com.focusforge.core.FaceSample
 import com.focusforge.core.RecordingBuilder
 import com.focusforge.core.SignalEngine
 import com.focusforge.core.SignalSnapshot
-import com.google.mediapipe.framework.image.BitmapImageBuilder
-import com.google.mediapipe.tasks.core.BaseOptions
-import com.google.mediapipe.tasks.vision.core.RunningMode
-import com.google.mediapipe.tasks.vision.facelandmarker.FaceLandmarker
 import com.google.mediapipe.tasks.vision.facelandmarker.FaceLandmarkerResult
 import java.io.File
 import java.text.SimpleDateFormat
@@ -71,20 +57,14 @@ class CameraActivity : ComponentActivity() {
     private val hudHandler = Handler(Looper.getMainLooper())
     private val logLines = ArrayDeque<String>()
 
-    private var faceLandmarker: FaceLandmarker? = null
-    private lateinit var analysisExecutor: ExecutorService
+    private var pipeline: FacePipeline? = null
     private lateinit var ioExecutor: ExecutorService
-    private var bitmapBuffer: Bitmap? = null
 
     // --- signals ---------------------------------------------------------------
     // The engine is only ever touched from the FaceLandmarker result thread; the snapshot
     // it produces is read by the HUD tick on the main thread, hence @Volatile.
     private val signalEngine = SignalEngine()
     @Volatile private var latestSnapshot: SignalSnapshot? = null
-    /** Size of the upright frame actually handed to the detector; recorded as-is. */
-    @Volatile private var analysisWidth = 0
-    @Volatile private var analysisHeight = 0
-
     // --- eye diagnostic (temporary — see docs/SIGNALS.md §5.1) ------------------
     // PERCLOS sat at exactly 0.000 on the A20e. To tell "the eyes are never scored"
     // from "the averaged score never reaches P80", the panel shows the two raw
@@ -122,7 +102,6 @@ class CameraActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        analysisExecutor = Executors.newSingleThreadExecutor()
         ioExecutor = Executors.newSingleThreadExecutor()
         recordingStore = RecordingStore(this)
 
@@ -189,7 +168,7 @@ class CameraActivity : ComponentActivity() {
 
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA)
             == PackageManager.PERMISSION_GRANTED) {
-            setUpLandmarkerThenCamera()
+            startPipeline()
         } else {
             requestPermissions(arrayOf(Manifest.permission.CAMERA), CAMERA_REQUEST)
         }
@@ -216,98 +195,28 @@ class CameraActivity : ComponentActivity() {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (requestCode == CAMERA_REQUEST &&
             grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) {
-            setUpLandmarkerThenCamera()
+            startPipeline()
         } else {
             toast("Camera permission is required for the probe")
             finish()
         }
     }
 
-    private fun setUpLandmarkerThenCamera() {
-        // Landmarker creation loads the model file; do it off the main thread.
-        analysisExecutor.execute {
-            try {
-                val options = FaceLandmarker.FaceLandmarkerOptions.builder()
-                    .setBaseOptions(
-                        BaseOptions.builder()
-                            .setModelAssetPath("models/face_landmarker.task")
-                            .build())
-                    .setRunningMode(RunningMode.LIVE_STREAM)
-                    .setNumFaces(1)
-                    .setOutputFaceBlendshapes(true)
-                    .setOutputFacialTransformationMatrixes(true)
-                    .setResultListener(this::onLandmarkerResult)
-                    .setErrorListener { e -> Log.e(TAG, "FaceLandmarker error", e) }
-                    .build()
-                faceLandmarker = FaceLandmarker.createFromOptions(this, options)
-                runOnUiThread { startCamera() }
-            } catch (e: Exception) {
-                Log.e(TAG, "FaceLandmarker init failed", e)
-                runOnUiThread {
-                    hudText.text = "FaceLandmarker init FAILED: ${e.message}"
-                }
-            }
-        }
+    private fun startPipeline() {
+        pipeline = FacePipeline(
+            activity = this,
+            perf = perf,
+            onResult = { sample, result, input -> onFaceSample(sample, result, input) },
+            onError = { message -> hudText.text = message },
+        ).also { it.start(previewView) }
     }
 
-    private fun startCamera() {
-        val providerFuture = ProcessCameraProvider.getInstance(this)
-        providerFuture.addListener({
-            val provider = providerFuture.get()
-
-            val preview = Preview.Builder().build().also {
-                it.setSurfaceProvider(previewView.surfaceProvider)
-            }
-
-            val analysis = ImageAnalysis.Builder()
-                // 640x480 per the phase spec — CLAUDE.md forbids silently raising it.
-                .setResolutionSelector(
-                    ResolutionSelector.Builder()
-                        .setResolutionStrategy(
-                            ResolutionStrategy(Size(640, 480),
-                                ResolutionStrategy.FALLBACK_RULE_CLOSEST_LOWER_THEN_HIGHER))
-                        .build())
-                .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-                .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888)
-                .build()
-                .also { it.setAnalyzer(analysisExecutor, this::analyzeFrame) }
-
-            provider.unbindAll()
-            provider.bindToLifecycle(
-                this, CameraSelector.DEFAULT_FRONT_CAMERA, preview, analysis)
-        }, ContextCompat.getMainExecutor(this))
-    }
-
-    private fun analyzeFrame(image: ImageProxy) {
-        perf.onFrame()
-        val buffer = bitmapBuffer ?: Bitmap.createBitmap(
-            image.width, image.height, Bitmap.Config.ARGB_8888).also { bitmapBuffer = it }
-        image.use { buffer.copyPixelsFromBuffer(image.planes[0].buffer) }
-
-        // Rotate to upright and mirror horizontally so landmark space matches the
-        // (mirrored) front-camera preview the user sees.
-        val matrix = Matrix().apply {
-            postRotate(image.imageInfo.rotationDegrees.toFloat())
-            postScale(-1f, 1f, buffer.width / 2f, buffer.height / 2f)
-        }
-        val rotated = Bitmap.createBitmap(buffer, 0, 0, buffer.width, buffer.height, matrix, true)
-
-        faceLandmarker?.detectAsync(
-            BitmapImageBuilder(rotated).build(), SystemClock.uptimeMillis())
-    }
-
-    private fun onLandmarkerResult(
+    /** Called on the detector thread. */
+    private fun onFaceSample(
+        sample: com.focusforge.core.FaceSample,
         result: FaceLandmarkerResult,
         input: com.google.mediapipe.framework.image.MPImage,
     ) {
-        perf.onInference(SystemClock.uptimeMillis() - result.timestampMs())
-
-        // The timestamp we handed detectAsync — the moment the frame was captured, not the
-        // moment inference finished. Replaying the recording must reproduce this timeline.
-        analysisWidth = input.width
-        analysisHeight = input.height
-        val sample = SignalMapper.toSample(
-            result, result.timestampMs(), input.width, input.height)
         latestSnapshot = signalEngine.update(sample)
         updateEyeDebug(sample)
         synchronized(recordLock) { recorder?.add(sample) }
@@ -395,8 +304,8 @@ class CameraActivity : ComponentActivity() {
                 androidVersion = Build.VERSION.RELEASE ?: "unknown",
                 appVersion = BuildConfig.VERSION_NAME,
                 startedAtEpochMs = System.currentTimeMillis(),
-                imageWidth = analysisWidth,
-                imageHeight = analysisHeight,
+                imageWidth = pipeline?.analysisWidth ?: 0,
+                imageHeight = pipeline?.analysisHeight ?: 0,
                 mirrored = true,
             )
         }
@@ -553,10 +462,9 @@ class CameraActivity : ComponentActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
-        analysisExecutor.shutdown()
         ioExecutor.shutdown()
-        faceLandmarker?.close()
-        faceLandmarker = null
+        pipeline?.close()
+        pipeline = null
     }
 
     private companion object {

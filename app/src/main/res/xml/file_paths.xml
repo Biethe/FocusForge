@@ -1,5 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- The only thing the app ever shares as a file: landmark recordings (numbers, no video). -->
+<!-- The only things the app ever shares as files: landmark recordings and session
+     exports. Both are numbers only — no video, no images (CLAUDE.md 4.3). -->
 <paths>
     <external-files-path name="replays" path="replays/" />
+    <external-files-path name="sessions" path="sessions/" />
 </paths>

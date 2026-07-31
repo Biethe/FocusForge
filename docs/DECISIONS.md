@@ -5,6 +5,43 @@
 > Every optimization gets before/after numbers from committed benchmark files —
 > negative results are kept and reported honestly.
 
+## 2026-07-31 — Phase 4: the focus score is a weighted sum, and the camera pipeline is shared
+
+- **What:** `FocusScorer` in `:core` fuses three of the Phase 3 signals into 0-100 with a
+  fatigue flag. Weights 0.50 attention / 0.30 alertness / 0.20 steadiness; anchors taken
+  from the measured ranges of the three recordings; 8 s exponential smoothing whose
+  coefficient is derived from the real frame gap; Schmitt trigger (0.60 on / 0.35 off) with
+  15 s and 30 s dwell times for the flag. Full rules in docs/SIGNALS.md §15.
+- **Why a weighted sum rather than anything cleverer:** it is the only form where the
+  contribution of each signal can be read off the constants and asserted in a test, and
+  where the coach can later say *why* the score is what it is. With one person's data and no
+  ground truth, anything fitted would be fitting noise.
+- **Alternative rejected — a multiplicative score** (`attention x alertness x steadiness`):
+  any single term at zero zeroes the whole score, so glancing away for one window would read
+  the same as falling asleep. The information about *which* axis failed is exactly what the
+  coaching message needs.
+- **Blink rate is deliberately excluded**, despite §14.3 showing it was the only signal that
+  isolated the distracted session — it did so by 13/min against 12/min. A one-blink margin
+  on one recording is not a term, it is noise with a name. Measured and exported, not scored.
+- **Evidence:** replayed over the three committed recordings, mean scores are focused 96.7,
+  distracted 74.9, drowsy 60.7, with the fatigue flag raised for 66% of the drowsy session
+  and never in the other two. Asserted in CI (`RecordedFocusScoreTest`), plus 18 synthetic
+  tests over the fusion and the hysteresis.
+- **Known limitation, documented not fixed:** those means are inflated by the 60 s windows
+  filling during the first minute of a 2-minute clip. Distracted settles at 33-51.
+
+## 2026-07-31 — Phase 4: FacePipeline extracted so two screens share one camera path
+
+- **What:** camera setup, MediaPipe configuration, frame rotation/mirroring and the result
+  callback moved out of `CameraActivity` into `FacePipeline`, now used by both it and the
+  new `SessionActivity`.
+- **Why:** the session screen needs precisely the same pipeline. The alternative was a
+  second copy of ~120 lines including the 640x480 resolution rule and the mirroring maths —
+  two copies that would drift, and only one of which anyone would remember to fix.
+- **Risk accepted:** this refactors code that was working and is the operator's diagnostic
+  tool. It compiles and the behaviour is line-for-line identical, but it is untested on the
+  phone until the operator installs 0.4.0. Flagged in PROGRESS as the thing to check first.
+
 ## 2026-07-31 — Phase 3.1: eye closure is measured geometrically, not from a confidence score
 
 - **What:** `eyeClosure` now comes from the eye aspect ratio of the lid landmarks, divided

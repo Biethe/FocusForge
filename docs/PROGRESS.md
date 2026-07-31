@@ -5,6 +5,70 @@
 > "operator confirmed: &lt;what was seen&gt;". If something is not measured yet, it says
 > `NOT MEASURED YET`.
 
+## 2026-07-31 — Phase 4: Focus score, fatigue flag, and the Session screen
+
+**Did**
+- Built the thing the whole project has been aiming at: **one number, 0 to 100**, that says
+  how focused you are right now, plus a **fatigue flag** that goes up when you are fading.
+- The score mixes three of the Phase 3 signals: are you pointed at your work (half the
+  score), are your eyes staying open (a third), is your head settled (the rest). Each is
+  turned into a 0-1 rating using the *measured* ranges from your own three recordings, then
+  blended. Every rule and every number is written out in `docs/SIGNALS.md` §15 — no weight
+  is buried in the code.
+- **Smoothing**, so the number does not twitch: it eases towards the truth over about 8
+  seconds. A single bad frame cannot move it; a real 30-second distraction clearly does.
+- **Hysteresis on the fatigue flag**, so the warning cannot flicker: the evidence has to
+  cross a high line and stay there 15 seconds to raise it, and fall under a *lower* line and
+  stay there 30 seconds to clear it. Getting tired is easier to declare than getting better.
+- **The Session screen**: big score at the top, a timeline of the whole session underneath
+  (with the tired stretches shaded red), elapsed time, live summary stats, and a small
+  camera preview so you can check you are in frame. Plus **Export session JSON**, which
+  shares a file containing every signal, every score, timestamps, and the phone's silicon
+  details from the Phase 1 probe.
+- Merged the camera plumbing that the camera screen and the session screen both need into
+  one place, so the two cannot drift apart.
+
+**Evidence**
+- **87 `:core` tests pass** (up from 66), including 21 new ones over the fusion, the
+  smoothing and the hysteresis specifically: the flag does not move on a single deep blink,
+  it does not flicker when the evidence hovers exactly on the trigger, and the score settles
+  at the same rate whether the camera runs at 30 fps or 5 fps.
+- Replayed over your three real recordings, **asserted in CI**:
+
+  | | focused | distracted | drowsy |
+  |---|---|---|---|
+  | mean score | **96.7** | 74.9 | 60.7 |
+  | lowest | 50 | 33 | 42 |
+  | fatigue flag | never | never | **66% of the session** |
+
+- APK builds locally, 33.9 MB, `0.4.0-phase4`.
+- On-phone behaviour: **NOT MEASURED YET** — that is your verification below.
+
+**Next — what you do**
+1. Install `0.4.0-phase4` from the dev-latest release. Open FocusForge → **Start focus
+   session**.
+2. **Check the camera screen still works first** (Open camera probe → the mesh appears, REC
+   works). Its camera code was moved into a shared file this session; it should behave
+   identically, but that is the one thing I could not test without the phone.
+3. Prop the phone up and read something for 5 minutes. The score should sit high and drift
+   gently, not jump around.
+4. Stare out of the window for 30 seconds. The score should visibly fall, then climb back
+   when you return. If it moves by ±30 within a second or two, tell me — that is a bug.
+5. Tap **Export session JSON** and send the file to the architect for review.
+
+**Risks**
+- The score's anchors come from *your* three recordings on *your* phone. On another face or
+  another stand they may be wrong, and there is no way to know until someone tries.
+- The 2-minute means above are flattered by the warm-up: the rolling windows spend the first
+  minute filling, so the distracted session reads 74.9 as a mean but settles at 33-51. Over
+  a real 25-minute session this does not matter. Do not quote 74.9 as "distracted scores 75".
+- The fatigue flag has only ever been tested against *acted* drowsiness (§14.2). It fires on
+  a performance of tiredness; whether it fires on the real thing is untested.
+- Blink rate and yawns are measured and exported but deliberately excluded from the score,
+  for reasons in §15.8. If the architect wants them in, that needs new measurements first.
+
+---
+
 ## 2026-07-31 — Phase 3.1b: PERCLOS fixed, and the replay tests are real
 
 **Did**

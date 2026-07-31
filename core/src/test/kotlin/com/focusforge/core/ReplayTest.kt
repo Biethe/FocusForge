@@ -4,6 +4,7 @@ import java.io.File
 import kotlin.math.sin
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 import org.junit.jupiter.api.Assumptions
 
@@ -239,5 +240,83 @@ class RecordedOrderingTest {
             d.longClosureCount > f.longClosureCount,
             "drowsy=${d.longClosureCount} focused=${f.longClosureCount}",
         )
+    }
+}
+
+/**
+ * The fused score against the operator's real recordings.
+ *
+ * The synthetic tests in FocusScorerTest prove the mixing rule does what it says. This
+ * proves the rule produces sane answers when fed a real face — which is a different
+ * question, and the one that would catch a weight chosen so badly that a genuinely focused
+ * session scores in the middle.
+ */
+class RecordedFocusScoreTest {
+
+    private val replayDir = File(System.getProperty("focusforge.replayDir") ?: "bench/replays")
+
+    private fun load(label: String): LandmarkRecording? =
+        replayDir.listFiles()
+            ?.filter { it.isFile && it.name.endsWith(".json") && it.name.contains(label) }
+            ?.minByOrNull { it.name }
+            ?.let { ReplayJson.decode(it.readText()) }
+
+    private class Result(val summary: SessionSummary, val everFatigued: Boolean)
+
+    private fun score(recording: LandmarkRecording): Result {
+        val engine = SignalEngine()
+        val scorer = FocusScorer()
+        var everFatigued = false
+        recording.samples().forEach { sample ->
+            if (scorer.update(engine.update(sample)).fatigue) everFatigued = true
+        }
+        return Result(scorer.summary(engine.cumulative()), everFatigued)
+    }
+
+    private fun all(): Triple<Result, Result, Result> {
+        val focused = load("focused")
+        val distracted = load("distracted")
+        val drowsy = load("drowsy")
+        Assumptions.assumeTrue(
+            focused != null && distracted != null && drowsy != null,
+            "NOT MEASURED YET — no operator recordings in ${replayDir.absolutePath}",
+        )
+        val f = score(focused!!); val x = score(distracted!!); val d = score(drowsy!!)
+        for ((label, r) in listOf("focused" to f, "distracted" to x, "drowsy" to d)) {
+            println(
+                "%-11s  meanScore=%5.1f  min=%3d  max=%3d  fatigue=%.2f of session  everFatigued=%s"
+                    .format(
+                        label, r.summary.meanScore, r.summary.minScore, r.summary.maxScore,
+                        r.summary.fatigueFraction, r.everFatigued,
+                    ),
+            )
+        }
+        return Triple(f, x, d)
+    }
+
+    @Test
+    fun `a focused session scores higher than a distracted one`() {
+        val (f, x, _) = all()
+        assertTrue(
+            f.summary.meanScore > x.summary.meanScore,
+            "focused=${f.summary.meanScore} distracted=${x.summary.meanScore}",
+        )
+    }
+
+    @Test
+    fun `a focused session scores higher than a drowsy one`() {
+        val (f, _, d) = all()
+        assertTrue(
+            f.summary.meanScore > d.summary.meanScore,
+            "focused=${f.summary.meanScore} drowsy=${d.summary.meanScore}",
+        )
+    }
+
+    @Test
+    fun `the fatigue flag fires when drowsy and never when focused`() {
+        val (f, x, d) = all()
+        assertTrue(d.everFatigued, "the drowsy session never raised the fatigue flag")
+        assertFalse(f.everFatigued, "the focused session raised the fatigue flag")
+        assertFalse(x.everFatigued, "the distracted session raised the fatigue flag")
     }
 }

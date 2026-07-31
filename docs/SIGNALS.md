@@ -121,7 +121,8 @@ What the closure was then depends on how long it lasted:
 20 seconds of data (`BLINK_RATE_MIN_COVERAGE_MS`) it reports *nothing* rather than
 extrapolating a rate from three seconds of camera. Typical adult rate is 12–20 per minute;
 both unusually low (locked-in concentration) and unusually high (strain) are meaningful,
-which is why Phase 4 will use the rate rather than a "good/bad" verdict.
+so the rate is reported as a number rather than a good/bad verdict. It is deliberately
+*not* an input to the focus score — see §15.8.
 
 If the face disappears mid-closure, the closure is abandoned rather than measured — we
 have no idea how long the eyes stayed shut while we could not see them.
@@ -620,3 +621,151 @@ recordings on different days (does focused-vs-focused vary as much as focused-vs
 a second person; a genuinely tired session recorded late at night rather than performed; and
 a hand-scored minute of video to check our closure detection against a human count. None of
 these are done. Until they are, every number in this project is a documented heuristic.
+
+---
+
+## 15. The focus score and the fatigue flag (Phase 4)
+
+Everything above measures *one thing at a time*. This section is the rule that turns them
+into the single number on the Session screen. The code is `core/.../FocusScore.kt` and every
+constant named here is in `FocusThresholds`.
+
+### 15.1 Three terms
+
+Each signal is first mapped onto 0..1 by a straight line between two anchors, clamped at
+both ends. The anchors come from the operator's three recordings (§14.3), which means they
+are **fitted to one person on one device** — the score compares you against your own earlier
+minutes, and nothing else.
+
+| Term | From | 0 at | 1 at | Why those anchors |
+|---|---|---|---|---|
+| **attention** | `gazeOnScreenFraction` | 0.40 | 0.90 | The distracted session ranged 0.28–0.92 over rolling windows; the focused one never fell below 0.98. 0.40 sits *inside* the distracted range, so looking away half the time already scores badly rather than merely starting to. |
+| **alertness** | `perclos` | 0.10 | 0.01 | Focused measured a flat 0.000 and distracted never passed 0.007, so under 0.01 is "eyes open". Drowsy ran 0.061–0.142. |
+| **steadiness** | `headStabilityDeg` | 15° | 2° | Focused measured 0.20–0.81°; distracted reached 29°. |
+
+### 15.2 The mix
+
+```
+rawScore = 100 x (0.50 x attention + 0.30 x alertness + 0.20 x steadiness)
+```
+
+The weights are **a judgement call, not a fitted result**: being pointed at the work is the
+most direct evidence of focus; eye closure is the fatigue axis the coach exists to catch;
+head movement corroborates but on its own would punish someone who simply fidgets. They sum
+to 1, so each term's maximum contribution is exactly its weight in points. There is a test
+asserting precisely that (`each term contributes exactly its documented weight`).
+
+### 15.3 Smoothing
+
+The displayed score is an exponential moving average of `rawScore` with a time constant of
+**8 seconds** (`SCORE_SMOOTHING_TAU_MS`): after 8 s about 63% of a step change has been
+absorbed, after 24 s about 95%.
+
+The coefficient is computed from the *actual* gap between frames —
+`alpha = 1 - exp(-dt / tau)` — not from a fixed per-frame constant. That matters because
+Phase 6 will deliberately drop the camera to ~5 fps: with a per-frame constant the score
+would suddenly feel sluggish exactly when the optimisation landed. There is a test that the
+score settles the same way at 30 fps and at 5 fps.
+
+Note the inputs are themselves 60-second rolling windows, so most of the smoothing already
+happened upstream; 8 s is the anti-twitch layer, not the main damping.
+
+### 15.4 The fatigue flag
+
+Evidence, 0..1, is the **larger** of two ramps — either route on its own is enough:
+
+```
+fatigueEvidence = max(
+    ramp(perclos,              0.02 -> 0.12),
+    ramp(longClosures/min,     1.0  -> 6.0 )
+)
+```
+
+The drowsy recording produced 16 long closures in two minutes (8/min); the distracted one
+produced 3 (1.5/min) and the focused one none.
+
+That evidence then drives a **Schmitt trigger with a dwell time on each edge**:
+
+| | Level | Must hold for |
+|---|---|---|
+| Raise the flag | evidence >= **0.60** | **15 s** |
+| Clear the flag | evidence <= **0.35** | **30 s** |
+
+- The **gap between 0.60 and 0.35** is what stops a value sitting on the line from blinking
+  the warning on and off. There is a test that alternates the input either side of the raise
+  level for five minutes and asserts the flag changes at most once.
+- The **dwell** is what stops a single deep blink raising an alarm: the evidence must be
+  past the level *continuously*, and any excursion back across it restarts the clock.
+- **Clearing is deliberately slower than raising.** One alert stretch does not mean the
+  tiredness has gone.
+
+### 15.5 Warming up
+
+`ready` is false until the neutral pose is calibrated (§2). The score is still computed, but
+the Session screen shows `--` rather than a number, because a score measured against an
+origin that is still moving would shift under the user for no reason they can see.
+
+### 15.6 What it does on the real recordings
+
+Replayed through the whole pipeline, whole-session means (`RecordedFocusScoreTest`):
+
+| | focused | distracted | drowsy |
+|---|---|---|---|
+| mean score | **96.7** | 74.9 | 60.7 |
+| lowest score | 50 | 33 | 42 |
+| fatigue flag raised | never | never | **66% of the session** |
+
+Asserted in CI: focused scores above both others, and the fatigue flag fires on the drowsy
+session and on neither of the other two.
+
+Two honest caveats about that table. The **means are flattered by the warm-up**: these are
+2-minute clips, and the 60-second rolling windows spend the first minute filling, so the
+distracted session's mean of 74.9 sits well above the 33–51 it settles at once the window
+is full. And the lowest score of 50 in the *focused* session is that same warm-up, not a
+lapse in attention. Over a realistic 25-minute session neither effect matters; over a
+2-minute clip they dominate, which is why §14.3 reports rolling windows from the second
+minute onwards instead.
+
+### 15.7 The session export
+
+`SessionRecording` (`core/.../SessionRecord.kt`), written by the Session screen's **Export
+session JSON** button and shared through the system share sheet. It carries the device and
+silicon facts from the Phase 1 probe, whole-session totals, and one row per second:
+
+```
+{
+  "schemaVersion": 1, "appVersion": "0.4.0-phase4",
+  "startedAtEpochMs": ..., "durationMs": ...,
+  "device": { "model": "...", "cpu_features": "...", "total_ram_bytes": "...", ... },
+  "summary": { "meanScore": 96.7, "minScore": 50, "maxScore": 100,
+               "fatigueFraction": 0.0, "perclos": 0.0, ... },
+  "samples": [
+    { "t": 0, "score": 88, "rawScore": 88.4,
+      "attention": 1.0, "alertness": 1.0, "steadiness": 0.61,
+      "fatigue": false, "fatigueEvidence": 0.0, "ready": true,
+      "faceVisible": true, "perclos": 0.0, "gazeOnScreenFraction": 0.99, ... },
+    ...
+  ]
+}
+```
+
+**It contains no landmarks and no blendshapes** — unlike a Phase 3 landmark recording, which
+is a test fixture and does. A session export is the safer of the two files to send anywhere,
+and there is a test asserting the encoded text cannot even mention face geometry.
+
+The timeline is thinned to one row per second (the pipeline produces about nine); the
+*summary* is still computed from every frame. A one-hour session is roughly 3 600 rows.
+
+### 15.8 What is deliberately not in the score
+
+- **Blink rate**, even though §14.3 found it was the one signal that isolated the distracted
+  session. It did so by 13/min against 12/min — a **one-blink margin** on a single
+  recording. A term that fragile would add noise dressed up as information. It is measured,
+  displayed and exported; it just does not move the score.
+- **Yawns**, because yawn detection does not work on this device at all (§9). A term that is
+  structurally zero would be dead weight, and worse, would look like evidence of calm.
+- **`faceVisible` as its own term.** Walking away already drives `gazeOnScreenFraction`
+  down, because a missing face counts as "not on screen" (§6). Adding a second penalty for
+  the same event would double-count it.
+
+If a later phase adds any of these, the reason should be a new measurement, not a hunch.
