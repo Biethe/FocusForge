@@ -534,3 +534,89 @@ Two layers, both on the `ubuntu-24.04-arm` runner (`core-tests` job):
 
 We assert **ordering only**. No accuracy percentage appears anywhere in this project,
 because we have no ground truth to compute one against.
+
+`SeparationReport` prints, but does not assert, the rolling-window spreads in §14.
+
+---
+
+## 14. How much can these numbers be trusted?
+
+Three separate questions, with three different answers. This section exists so that nobody
+— including us — quotes a number from this project as more than it is.
+
+### 14.1 Which parts come from research?
+
+| Signal | Basis | Confidence |
+|---|---|---|
+| **PERCLOS** | Wierwille & Ellsworth (1994); Dinges & Grace (1998, FHWA). The most validated drowsiness measure in the literature, correlated against psychomotor vigilance lapses. The P80 variant is standard. | Definition: strong. Our measurement of it: unvalidated. |
+| **Eye aspect ratio** | Soukupová & Čech (2016), *Real-Time Eye Blink Detection using Facial Landmarks*. The formula in §3 is theirs. | Formula: strong. Our per-user normalisation is sensible engineering, not a published method. |
+| **Blink duration bands** (50–500 ms blink, >500 ms long closure) | Human blinks run roughly 100–400 ms across many studies; drowsiness work commonly treats sustained closures separately, at 500 ms or 1 s. | Reasonable. Our 500 ms line is at the permissive end. |
+| **Blink rate** | 12–20/min is the usual resting figure; it drops substantially during reading and screen work. Our focused session read 5–6/min, which is consistent with that. | Reasonable as an observation. We make no inference from it. |
+| **Gaze cone** (25° yaw, 20° pitch, 0.35 iris) | **Nothing.** We chose these by reasoning about a phone on a desk stand. | Invented. |
+| **Head stability** (6° spread) | **Nothing.** | Invented. |
+| **Yawn timing** (1.2 s, 5 s refractory) | Loosely, that the wide-open phase of a yawn is shorter than the yawn. | Invented — and it does not work here anyway (§9). |
+
+The honest summary: **the drowsiness half has real research behind its definitions and the
+attention half does not.** The gaze and head-stability thresholds are documented guesses.
+
+### 14.2 Can the numbers be trusted?
+
+**Not as absolute measurements, and not by anyone other than the person who recorded them.**
+
+- The research validated PERCLOS using dedicated eye-tracking instrumentation. We measure it
+  from a 640×480 front camera at ~9 fps through a face mesh that was never designed to
+  report eyelid aperture. Same definition, different instrument, no crosswalk between them.
+- **Do not import cutoffs from the literature onto our numbers.** Driving studies associate
+  PERCLOS above roughly 0.15 with meaningful drowsiness. Our drowsy session scored 0.118 —
+  which does *not* mean "below the danger line", because our scale reads low by construction
+  (§5.1). Comparing our PERCLOS to a published threshold is a category error.
+- There is no ground truth anywhere in this project. Nobody scored these recordings by hand,
+  no alertness test was administered, and the operator was *acting* drowsy rather than being
+  drowsy. What §14.3 shows is that the pipeline separates three deliberately performed
+  behaviours — not that it detects fatigue.
+- n = 1 person, 1 session per state, one device, one room, three consecutive recordings.
+  Nothing here generalises to another face, another light, or another phone.
+
+What the numbers *are* good for: comparing one person against their own earlier minutes on
+the same device in the same session. That is exactly the scope of a self-coaching tool, and
+it is the only claim this project makes.
+
+### 14.3 Are they sensitive enough to tell the three states apart?
+
+Measured, not asserted. Rolling windows from the second minute of each recording onwards,
+one window per frame, printed by `SeparationReport` (run it: `./gradlew -PcoreOnly
+:core:test --tests '*SeparationReport*' -i`):
+
+| | focused | distracted | drowsy |
+|---|---|---|---|
+| PERCLOS | 0.000 flat | 0.000–0.007 | **0.061–0.142** |
+| gaze on screen | **0.982–0.991** | 0.276–0.916 | 0.634–0.734 |
+| head spread | **0.20–0.81°** | 2.5–29.0° | 1.5–7.8° |
+| blink rate | 5–12/min | **13–32/min** | 3–12/min |
+
+**No single signal separates all three states. Every state is isolated by at least one:**
+
+- **PERCLOS isolates drowsy.** Its lowest drowsy window (0.061) is nearly nine times the
+  highest window from either other session (0.007). Clean.
+- **Blink rate isolates distracted** — 13/min at its lowest against 12/min at the other two
+  sessions' highest. A one-blink margin: real in this data, far too thin to rely on.
+- **Gaze and head stability isolate focused**, and neither is close: the focused session
+  never left 0.98 gaze or 0.81° of head movement.
+- **Overlaps that matter:** distracted and drowsy overlap on gaze *and* on head movement,
+  and focused and drowsy overlap on blink rate. So a Phase 4 score that reads only gaze
+  cannot tell someone tired from someone distracted — the thing a coach most needs to get
+  right, since the useful advice differs.
+
+**The statistical caveat is large.** Those windows are 60 s long inside a 120 s recording,
+so the ~560 windows per session are not 560 independent observations — they are one or two,
+heavily autocorrelated. "SEPARATED" above is a description of this data, not a significance
+test, and it would be wrong to report it as one. What it genuinely rules out is a pipeline
+so noisy that a single reading is meaningless; what it cannot tell us is whether the
+separation survives a different person, a different day, or genuine rather than acted
+fatigue.
+
+**What would actually raise confidence**, in rough order of value per hour spent: repeat
+recordings on different days (does focused-vs-focused vary as much as focused-vs-drowsy?);
+a second person; a genuinely tired session recorded late at night rather than performed; and
+a hand-scored minute of video to check our closure detection against a human count. None of
+these are done. Until they are, every number in this project is a documented heuristic.

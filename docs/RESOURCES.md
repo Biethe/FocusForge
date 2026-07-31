@@ -45,6 +45,25 @@ The three papers from the original project idea go in the README as background r
   profiling toolkit, Neoverse/cloud-oriented. Stretch goal only: one profiling run of our :core
   replay on the arm64 runner or a cloud box, for a bonus screenshot. Do not let it block anything.
 
+## Where the signal definitions come from
+
+Read alongside `docs/SIGNALS.md` §14, which states plainly which of our signals have a
+research basis (the drowsiness ones) and which are documented guesses (the attention ones).
+We cite these for their *definitions*; none of them validate our implementation, which uses
+a phone camera at ~9 fps where the studies used dedicated eye-tracking hardware.
+
+- **PERCLOS** — Wierwille & Ellsworth (1994), and Dinges & Grace (1998), *PERCLOS: A Valid
+  Psychophysiological Measure of Alertness as Assessed by Psychomotor Vigilance* (US FHWA
+  report). The origin of the measure and of the P80 variant we implement.
+- **Eye aspect ratio** — Soukupová & Čech (2016), *Real-Time Eye Blink Detection using
+  Facial Landmarks*, CVWW. The EAR formula in SIGNALS.md §3 is theirs.
+- Blink duration and rate figures in SIGNALS.md §4 are the standard ranges reported across
+  the blink literature rather than any single paper, and we make no inference from them.
+
+**Not used, deliberately:** engagement/affect datasets (DAiSEE, EngageWild and similar) are
+research-licensed, and CLAUDE.md §4.2 forbids downloading, training on, or shipping them.
+We do not train anything — every threshold here is hand-set and documented.
+
 ## Tools on your side
 
 - **scrcpy** (https://github.com/Genymobile/scrcpy): mirrors and screen-records your phone from
