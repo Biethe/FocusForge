@@ -135,6 +135,29 @@ Two details that matter more than the threshold:
    time that was. Counting an absent face as "not closed" would quietly flatter a user who
    left the room.
 
+### 5.1 Open question: is 0.80 the right number on this device?
+
+The P80 definition comes from research that measures the *eyelid aperture* — the percentage
+of the pupil actually covered by the lid. We do not have that. We have MediaPipe's
+`eyeBlink` score, which is a model output on a 0–1 scale, not a physical percentage. Using
+0.80 on it assumes the two scales line up. **That assumption has never been checked**, and
+on the operator's A20e, PERCLOS reads 0.000 even during a deliberate one-minute eye closure
+(reported 2026-07-31).
+
+Two candidate explanations, and they need opposite fixes:
+
+1. The eyes are never scored at all — no blendshapes reach `SignalEngine`, so
+   `perclosCoverageMs` stays at 0. That would be a plumbing bug.
+2. The averaged score is real but never reaches 0.80. We average the two eyes
+   (§3), so an asymmetric read — one eye 0.95, the other 0.55 — averages to 0.75 and never
+   crosses the line, while blinks still count because they only need 0.50. PERCLOS would
+   then sit at exactly 0.000 forever with everything else working.
+
+Build `0.3.1-eyediag` adds two lines to the live panel to tell these apart: the two raw
+`eyeBlink` scores, their average, the landmark EAR, the number of blendshapes received, and
+the extremes seen since the last tap on the panel. What the device actually produces is
+`NOT MEASURED YET`. No threshold changes until it is measured.
+
 ---
 
 ## 6. Gaze on screen
@@ -370,6 +393,29 @@ your own eyes, no numbers required:
 
 - **Close your eyes and hold them shut** → `PERCLOS` climbs, `long closures` ticks up.
 - **Turn your head away** → `gaze` flips from `ON` to `OFF`.
+
+### The eye diagnostic (build 0.3.1-eyediag, temporary)
+
+Two extra lines near the bottom of the panel exist to settle §5.1. To read them:
+
+1. Open the camera screen, look at the phone normally for ~10 seconds.
+2. **Tap the signals panel once** — a "Eye peaks reset" message appears. This clears the
+   `eyes peak` line so it measures only what happens next.
+3. Close your eyes and hold them shut for **15 seconds**. Keep your head still and facing
+   the phone.
+4. Open your eyes and read the two lines out loud / photograph them:
+
+```
+eyes raw  L 0.04  R 0.05  avg 0.05  EAR 0.26  bs 13
+eyes peak L 0.97  R 0.62  avg 0.79 (P80=0.80)  EAR 0.11..0.27  [tap=reset]
+```
+
+(Those numbers are an illustration, not a measurement.) What matters is `bs` — 0 means no
+blendshapes arrived at all — and `peak avg`, which is the number PERCLOS compares against
+0.80.
+
+**This does not block the three recordings.** Recordings store the raw blendshape values,
+so PERCLOS can be recomputed at any threshold afterwards without re-recording.
 
 ---
 

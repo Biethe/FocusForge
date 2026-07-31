@@ -5,6 +5,50 @@
 > "operator confirmed: &lt;what was seen&gt;". If something is not measured yet, it says
 > `NOT MEASURED YET`.
 
+## 2026-07-31 — Phase 3.1: Eye diagnostic (PERCLOS reads 0.000 on the phone)
+
+**Did**
+- The operator reported that PERCLOS stays at exactly `0.000` on the A20e even while
+  holding both eyes shut for a full minute. Read the whole path — the mapper that receives
+  MediaPipe's output, the eye-closure formula, and the rolling time window that produces
+  PERCLOS. The time-window maths is correct, so the problem is upstream of it: either the
+  eyes are never scored at all, or the score never gets high enough to count as "closed".
+- Rather than guess a new threshold, added a **temporary diagnostic** to the camera screen
+  (build `0.3.1-eyediag`): two extra lines showing the two raw eye-blink values exactly as
+  MediaPipe reports them, their average (the number PERCLOS tests against 0.80), the
+  eye-shape measurement from the lid landmarks, how many blendshapes arrived, and the
+  extreme values seen. Tapping the panel resets the extremes so one thing can be measured
+  at a time. The same numbers go to logcat.
+- Wrote down the open question honestly in `docs/SIGNALS.md` §5.1: the 0.80 cutoff is
+  borrowed from research that measures how much of the eye is physically covered, while we
+  feed it a model confidence score. Those two scales were never checked against each other.
+- **No threshold was changed.** Changing it before measuring would be inventing a number.
+
+**Evidence**
+- Symptom: operator confirmed — PERCLOS `0.000` on-screen during a deliberate one-minute
+  eye closure, A20e, 2026-07-31.
+- Diagnostic build compiles: `./gradlew assembleDebug` succeeded locally
+  (`app/build/outputs/apk/debug/app-debug.apk`, 33.8 MB, versionName `0.3.1-eyediag`).
+- What the phone actually produces for the raw eye values: `NOT MEASURED YET` — that is
+  precisely what this build exists to find out.
+
+**Next**
+- Operator installs `0.3.1-eyediag`, follows the 4-step procedure in `docs/SIGNALS.md` §12
+  ("The eye diagnostic"), and reports the two lines.
+- Then: either fix the plumbing (if no blendshapes arrive) or set the PERCLOS cutoff from
+  the measured values and record the before/after in `docs/DECISIONS.md`.
+- The three labelled 2-minute recordings are **not blocked** by this — they store the raw
+  values, so PERCLOS can be recomputed at any cutoff later without re-recording.
+
+**Risks**
+- If the raw eye values turn out to be weak on this phone (poor lighting, fixed-focus 8 MP
+  front camera at 50 cm), PERCLOS may not be a usable signal on the A20e at all. The
+  fallback is the long-closure count, which uses the lower 0.50 cutoff and appears to work.
+  We would report that honestly rather than tune the number until it looks good.
+- The diagnostic lines make the panel taller. They come out once the question is settled.
+
+---
+
 ## 2026-07-28 — Phase 3: Signals in :core + replay tests
 
 **Did**

@@ -30,6 +30,8 @@ import androidx.camera.core.resolutionselector.ResolutionStrategy
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.core.content.ContextCompat
+import com.focusforge.core.Blendshapes
+import com.focusforge.core.EyeGeometry
 import com.focusforge.core.FaceSample
 import com.focusforge.core.RecordingBuilder
 import com.focusforge.core.SignalEngine
@@ -83,6 +85,32 @@ class CameraActivity : ComponentActivity() {
     @Volatile private var analysisWidth = 0
     @Volatile private var analysisHeight = 0
 
+    // --- eye diagnostic (temporary — see docs/SIGNALS.md §5.1) ------------------
+    // PERCLOS sat at exactly 0.000 on the A20e. To tell "the eyes are never scored"
+    // from "the averaged score never reaches P80", the panel shows the two raw
+    // eyeBlink values, their average, the landmark-derived EAR, and the extremes
+    // seen so far. Written on the detector thread, read by the HUD tick.
+    private class EyeDebug(
+        val left: Double?,
+        val right: Double?,
+        val avg: Double?,
+        val ear: Double?,
+        val blendshapeCount: Int,
+        val peakLeft: Double,
+        val peakRight: Double,
+        val peakAvg: Double,
+        val earOpen: Double,
+        val earClosed: Double,
+    )
+
+    @Volatile private var eyeDebug: EyeDebug? = null
+    @Volatile private var eyePeakResetRequested = false
+    private var peakLeft = 0.0
+    private var peakRight = 0.0
+    private var peakAvg = 0.0
+    private var earOpen = 0.0
+    private var earClosed = Double.MAX_VALUE
+
     // --- recording -------------------------------------------------------------
     private lateinit var recordingStore: RecordingStore
     private val recordLock = Any()
@@ -103,7 +131,10 @@ class CameraActivity : ComponentActivity() {
         }
         landmarkOverlay = LandmarkOverlayView(this)
         hudText = makeMonoText()
-        signalsText = makeMonoText().apply { textSize = 11f }
+        signalsText = makeMonoText().apply {
+            textSize = 11f
+            setOnClickListener { resetEyePeaks() }
+        }
         logText = makeMonoText().apply { textSize = 10f }
 
         labelButton = Button(this).apply {
@@ -278,6 +309,7 @@ class CameraActivity : ComponentActivity() {
         val sample = SignalMapper.toSample(
             result, result.timestampMs(), input.width, input.height)
         latestSnapshot = signalEngine.update(sample)
+        updateEyeDebug(sample)
         synchronized(recordLock) { recorder?.add(sample) }
 
         runOnUiThread {
@@ -285,6 +317,65 @@ class CameraActivity : ComponentActivity() {
             if (faces.isEmpty()) landmarkOverlay.clear()
             else landmarkOverlay.setResults(faces[0], input.width, input.height)
         }
+    }
+
+    // ------------------------------------------------------------------ eye diagnostic
+
+    /**
+     * Records what the eye signals actually look like on this device: the two raw
+     * eyeBlink blendshapes exactly as MediaPipe reports them, their average (which is
+     * what PERCLOS thresholds at 0.80), and the eye aspect ratio computed from the lid
+     * landmarks. Extremes are kept because a closure lasts a second and the panel only
+     * refreshes once a second — the peak is what tells us how close we get to P80.
+     *
+     * Diagnostic only: it reads the same allow-listed sample everything else reads and
+     * stores nothing to disk.
+     */
+    private fun updateEyeDebug(sample: FaceSample) {
+        if (eyePeakResetRequested) {
+            eyePeakResetRequested = false
+            peakLeft = 0.0
+            peakRight = 0.0
+            peakAvg = 0.0
+            earOpen = 0.0
+            earClosed = Double.MAX_VALUE
+        }
+        if (!sample.faceVisible) return
+        val left = sample.blendshapes[Blendshapes.EYE_BLINK_LEFT]?.toDouble()
+        val right = sample.blendshapes[Blendshapes.EYE_BLINK_RIGHT]?.toDouble()
+        val avg = when {
+            left != null && right != null -> (left + right) / 2.0
+            else -> left ?: right
+        }
+        val ear = EyeGeometry.meanEyeAspectRatio(
+            sample.landmarks, sample.imageWidth, sample.imageHeight)
+
+        left?.let { peakLeft = maxOf(peakLeft, it) }
+        right?.let { peakRight = maxOf(peakRight, it) }
+        avg?.let { peakAvg = maxOf(peakAvg, it) }
+        // EAR runs the other way: it *falls* as the lid comes down, so the closed
+        // extreme is the minimum and the open extreme is the maximum.
+        ear?.let {
+            earOpen = maxOf(earOpen, it)
+            earClosed = minOf(earClosed, it)
+        }
+
+        eyeDebug = EyeDebug(
+            left = left, right = right, avg = avg, ear = ear,
+            blendshapeCount = sample.blendshapes.size,
+            peakLeft = peakLeft, peakRight = peakRight, peakAvg = peakAvg,
+            earOpen = earOpen, earClosed = earClosed,
+        )
+    }
+
+    /**
+     * Tapping the panel clears the extremes so the operator can measure one thing at a
+     * time (eyes open, then eyes shut). The peaks belong to the detector thread, so the
+     * tap only raises a flag and that thread does the clearing.
+     */
+    private fun resetEyePeaks() {
+        eyePeakResetRequested = true
+        toast("Eye peaks reset")
     }
 
     // ------------------------------------------------------------------ recording
@@ -361,6 +452,13 @@ class CameraActivity : ComponentActivity() {
                 Locale.US, perf.fps(), perf.avgInferenceMs(), perf.rssMb())
             signalsText.text = describeSignals()
             Log.i(TAG, line)
+            // Same numbers in logcat, so `adb logcat -s PerfHUD` is a second way to read
+            // the diagnostic if the panel is hard to photograph.
+            eyeDebug?.let {
+                Log.i(TAG, "eyes L=%s R=%s avg=%s ear=%s bs=%d peakAvg=%.2f".format(
+                    Locale.US, f2(it.left), f2(it.right), f2(it.avg), f2(it.ear),
+                    it.blendshapeCount, it.peakAvg))
+            }
             logLines.addLast(line)
             while (logLines.size > LOG_LINES) logLines.removeFirst()
             logText.text = logLines.joinToString("\n")
@@ -405,9 +503,35 @@ class CameraActivity : ComponentActivity() {
             appendLine("steadines %.1f deg spread  %s".format(
                 Locale.US, s.headStabilityDeg, if (s.headStable) "STABLE" else "MOVING"))
             appendLine("yawns     %d".format(Locale.US, s.yawnCount))
-                append(recordingLine)
+            append(describeEyeDebug())
+            appendLine(recordingLine)
         }
     }
+
+    /**
+     * The temporary eye diagnostic, two lines. Reading them:
+     *
+     *  - `bs 0` means MediaPipe returned no blendshapes at all on this device and the
+     *    whole eye path is running on the EAR fallback (or on nothing).
+     *  - `avg` is the number PERCLOS compares against 0.80. If `peak avg` stays below
+     *    0.80 while the eyes are genuinely shut, the threshold is wrong for this device,
+     *    not the pipeline.
+     *  - `EAR` open/closed shows whether the landmark path separates the two states,
+     *    i.e. whether it is a usable second opinion.
+     */
+    private fun describeEyeDebug(): String {
+        val d = eyeDebug ?: return "eyes raw  no face seen yet\n"
+        return buildString {
+            appendLine("eyes raw  L %s  R %s  avg %s  EAR %s  bs %d".format(
+                Locale.US, f2(d.left), f2(d.right), f2(d.avg), f2(d.ear), d.blendshapeCount))
+            appendLine("eyes peak L %.2f  R %.2f  avg %.2f (P80=0.80)  EAR %s..%s  [tap=reset]".format(
+                Locale.US, d.peakLeft, d.peakRight, d.peakAvg,
+                f2(if (d.earClosed == Double.MAX_VALUE) null else d.earClosed), f2(d.earOpen)))
+        }
+    }
+
+    private fun f2(value: Double?): String =
+        value?.let { "%.2f".format(Locale.US, it) } ?: " n/a"
 
     private fun deg(value: Double?): String =
         value?.let { "%+.0f".format(Locale.US, it) } ?: "n/a"
