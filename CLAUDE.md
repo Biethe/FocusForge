@@ -5,7 +5,7 @@
 > The human operator is NOT an Android or ML expert. The architect (a separate Claude chat) wrote
 > this file and reviews progress via `docs/PROGRESS.md`. You are the builder.
 
-**STATUS: Phase 3.1 — investigating PERCLOS reading 0.000 on the A20e (2026-07-31). The time-window maths checks out; build `0.3.1-eyediag` adds a temporary raw eye-value readout to find out whether the eyes are never scored or the 0.80 cutoff is simply never reached (docs/SIGNALS.md §5.1). Awaiting operator: the eye-diagnostic reading (§12), Phase 2 HUD numbers, and the three labelled 2-minute recordings — which are NOT blocked by this. No threshold changed until measured. Next: settle the cutoff, then Phase 4 — focus score + session dashboard.** (Update this line at the end of every session.)
+**STATUS: Phase 3.1 — PERCLOS diagnosed (2026-07-31). Pipeline and plumbing are correct; `PERCLOS_CLOSED_LEVEL = 0.80` is simply unreachable on the A20e, where a fully held closure peaks at 0.73 on MediaPipe's eyeBlink score (docs/SIGNALS.md §5.1). Landmark EAR separates open/closed 14x and is the stronger candidate input. NOT changed yet: a cutoff picked from a single-frame extreme would be as wrong as the paper's. Awaiting operator: the three labelled 2-minute recordings (§12) — `bench/analyze_eye_scale.py` then gives the real distributions, the cutoff comes from those, and the replay assertions go green in the same commit. Also outstanding: Phase 2 HUD numbers. Next after that: Phase 4 — focus score + session dashboard.** (Update this line at the end of every session.)
 
 ## 1. What we are building
 

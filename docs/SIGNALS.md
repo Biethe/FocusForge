@@ -140,23 +140,37 @@ Two details that matter more than the threshold:
 The P80 definition comes from research that measures the *eyelid aperture* — the percentage
 of the pupil actually covered by the lid. We do not have that. We have MediaPipe's
 `eyeBlink` score, which is a model output on a 0–1 scale, not a physical percentage. Using
-0.80 on it assumes the two scales line up. **That assumption has never been checked**, and
-on the operator's A20e, PERCLOS reads 0.000 even during a deliberate one-minute eye closure
-(reported 2026-07-31).
+0.80 on it assumes the two scales line up.
 
-Two candidate explanations, and they need opposite fixes:
+**They do not, on this device.** Measured on the A20e with build `0.3.1-eyediag`,
+2026-07-31, operator holding both eyes fully shut for 15 s:
 
-1. The eyes are never scored at all — no blendshapes reach `SignalEngine`, so
-   `perclosCoverageMs` stays at 0. That would be a plumbing bug.
-2. The averaged score is real but never reaches 0.80. We average the two eyes
-   (§3), so an asymmetric read — one eye 0.95, the other 0.55 — averages to 0.75 and never
-   crosses the line, while blinks still count because they only need 0.50. PERCLOS would
-   then sit at exactly 0.000 forever with everything else working.
+| Reading | Eyes open | Peak during a held closure |
+|---|---|---|
+| `eyeBlink` left | 0.16 | **0.79** |
+| `eyeBlink` right | 0.09 | **0.66** |
+| average of the two (what PERCLOS tests) | 0.12 | **0.73** |
+| eye aspect ratio from the lid landmarks | 0.26 | **0.02** (open extreme 0.28) |
 
-Build `0.3.1-eyediag` adds two lines to the live panel to tell these apart: the two raw
-`eyeBlink` scores, their average, the landmark EAR, the number of blendshapes received, and
-the extremes seen since the last tap on the panel. What the device actually produces is
-`NOT MEASURED YET`. No threshold changes until it is measured.
+With `perclosCoverageMs` reporting a full 60 s of measurable time and `bs 13` confirming
+every allow-listed blendshape arrives, the pipeline is working exactly as designed — the
+cutoff is simply unreachable. Note that this is *not* the two-eye averaging: the more
+closed eye alone peaked at 0.79, still under 0.80. The score's scale does not reach 0.8.
+
+The landmark path separated open from closed by a factor of 14 over the same test, which
+makes it the stronger candidate as PERCLOS's input — and, being a true aperture ratio, the
+one that lets us keep the P80 definition rather than bend a threshold to fit a confidence
+score.
+
+**Still unmeasured:** the *typical* value during a sustained closure. Both numbers above are
+single-frame extremes, and a cutoff picked from an extreme under-triggers just as badly as
+one picked from a paper. The `drowsy` recording in §12 is twelve 2-second closures, which
+is exactly the distribution needed; `bench/analyze_eye_scale.py` computes it from the raw
+frames. **No threshold changes until that analysis exists** (CLAUDE.md §4.1).
+
+Until then PERCLOS reads 0.000 on this phone. That is a known-wrong number, kept visible
+rather than papered over, and `longClosureCount` (cutoff 0.50, which *is* reached) carries
+the drowsiness signal in the meantime.
 
 ---
 
@@ -391,7 +405,9 @@ Alternatively, plug the phone into the PC by USB and copy from
 The panel under the performance HUD shows every value live. Two things you can verify with
 your own eyes, no numbers required:
 
-- **Close your eyes and hold them shut** → `PERCLOS` climbs, `long closures` ticks up.
+- **Close your eyes and hold them shut** → `long closures` ticks up.
+  (`PERCLOS` stays at 0.000 on the A20e — that is the known-wrong cutoff described in §5.1,
+  not a fault in your recording. It does not affect what gets stored.)
 - **Turn your head away** → `gaze` flips from `ON` to `OFF`.
 
 ### The eye diagnostic (build 0.3.1-eyediag, temporary)
@@ -414,8 +430,12 @@ eyes peak L 0.97  R 0.62  avg 0.79 (P80=0.80)  EAR 0.11..0.27  [tap=reset]
 blendshapes arrived at all — and `peak avg`, which is the number PERCLOS compares against
 0.80.
 
-**This does not block the three recordings.** Recordings store the raw blendshape values,
-so PERCLOS can be recomputed at any threshold afterwards without re-recording.
+**This was run on 2026-07-31; the result is in §5.1.** The procedure is kept here because
+it is worth re-running on any second device.
+
+**It does not block the three recordings.** Recordings store the raw blendshape values and
+the lid landmarks, so PERCLOS can be recomputed under any definition or cutoff afterwards
+without re-recording.
 
 ---
 
