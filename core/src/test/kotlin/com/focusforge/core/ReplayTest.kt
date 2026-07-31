@@ -225,6 +225,20 @@ class RecordedOrderingTest {
     }
 
     @Test
+    fun `a focused reading session has a humanly plausible blink rate`() {
+        // Deliberately loose. It is not a claim about blink physiology — it is a tripwire
+        // for the failure that produced this test: on 2026-07-31 a session counted zero
+        // blinks in 64 s and nothing in CI noticed, because every assertion here was a
+        // comparison between two recordings and both were equally wrong.
+        val (f, _, _) = requireAll()
+        assertTrue(
+            f.blinkRatePerMin in 3.0..30.0,
+            "focused blink rate ${f.blinkRatePerMin}/min is not humanly plausible",
+        )
+        assertTrue(f.blinkCount > 0, "no blinks at all in a two-minute reading session")
+    }
+
+    @Test
     fun `gaze-on-screen is higher when focused than when distracted`() {
         val (f, x, _) = requireAll()
         assertTrue(

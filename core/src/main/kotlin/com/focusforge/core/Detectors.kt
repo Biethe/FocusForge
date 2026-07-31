@@ -5,14 +5,48 @@ import kotlin.math.sqrt
 /**
  * Counts blinks and long eye closures from the eye-closure trace, with hysteresis.
  *
- * A closure is a blink when it lasts between [SignalConfig.blinkMinMs] and
- * [SignalConfig.blinkMaxMs]; anything longer is a *long closure*, which is the interesting
- * one for fatigue. Closures shorter than the minimum are treated as detector noise.
+ * **Two state machines, deliberately, on two different threshold pairs.** A blink is a
+ * transient dip we only need to notice, so it runs on the sensitive pair
+ * ([SignalConfig.eyeCloseLevel] / [SignalConfig.eyeOpenLevel]). A long closure feeds the
+ * fatigue alarm, so it runs on the stricter pair ([SignalConfig.longClosureLevel] /
+ * [SignalConfig.longClosureOpenLevel]) — sharing one machine forced a single compromise
+ * that either missed half the blinks or turned "looking down at a second phone" into a
+ * string of multi-second closures. The measurements behind both pairs are in SignalConfig
+ * and docs/SIGNALS.md §16.
+ *
+ * A closure on the blink machine is a blink when it lasts between [SignalConfig.blinkMinMs]
+ * and [SignalConfig.blinkMaxMs]. Anything shorter is detector noise.
  */
 class BlinkDetector(private val config: SignalConfig) {
 
-    private var eyesClosed = false
-    private var closedSinceMs = 0L
+    /** One hysteresis state machine over the closure trace. */
+    private class Closure(private val enter: Double, private val exit: Double) {
+        var closed = false
+            private set
+        var sinceMs = 0L
+            private set
+
+        fun reset() { closed = false; sinceMs = 0L }
+
+        /** Returns the closure's duration when one ends on this sample, else null. */
+        fun update(timestampMs: Long, closure: Double): Long? {
+            if (!closed) {
+                if (closure >= enter) {
+                    closed = true
+                    sinceMs = timestampMs
+                }
+                return null
+            }
+            if (closure <= exit) {
+                closed = false
+                return timestampMs - sinceMs
+            }
+            return null
+        }
+    }
+
+    private val blinkMachine = Closure(config.eyeCloseLevel, config.eyeOpenLevel)
+    private val longMachine = Closure(config.longClosureLevel, config.longClosureOpenLevel)
     private var longClosureCounted = false
     private val blinkTimesMs = ArrayDeque<Long>()
 
@@ -28,35 +62,35 @@ class BlinkDetector(private val config: SignalConfig) {
         if (!measurable) {
             // We cannot see the eyes; abandon any closure in progress rather than guess
             // how long it lasted.
-            eyesClosed = false
+            blinkMachine.reset()
+            longMachine.reset()
             longClosureCounted = false
             return
         }
-        if (!eyesClosed) {
-            if (closure >= config.eyeCloseLevel) {
-                eyesClosed = true
-                closedSinceMs = timestampMs
-                longClosureCounted = false
-            }
-            return
-        }
-        val durationMs = timestampMs - closedSinceMs
-        if (!longClosureCounted && durationMs > config.blinkMaxMs) {
-            longClosureCount++
-            longClosureCounted = true
-        }
-        if (closure <= config.eyeOpenLevel) {
-            eyesClosed = false
+
+        blinkMachine.update(timestampMs, closure)?.let { durationMs ->
             if (durationMs in config.blinkMinMs..config.blinkMaxMs) {
                 blinkCount++
                 lastBlinkDurationMs = durationMs
                 blinkTimesMs.addLast(timestampMs)
             }
         }
+
+        // The long-closure machine counts as soon as the duration passes the blink ceiling,
+        // rather than waiting for the eye to reopen, so a closure in progress is already
+        // visible to the fatigue flag.
+        if (!longMachine.closed) longClosureCounted = false
+        longMachine.update(timestampMs, closure)
+        if (longMachine.closed && !longClosureCounted &&
+            timestampMs - longMachine.sinceMs > config.blinkMaxMs
+        ) {
+            longClosureCount++
+            longClosureCounted = true
+        }
     }
 
     /** True while a closure is in progress (used by the live debug view). */
-    val eyesCurrentlyClosed: Boolean get() = eyesClosed
+    val eyesCurrentlyClosed: Boolean get() = blinkMachine.closed
 
     /**
      * Blinks per minute over the rolling window, or null while there is too little data to
@@ -72,8 +106,8 @@ class BlinkDetector(private val config: SignalConfig) {
     }
 
     fun reset() {
-        eyesClosed = false
-        closedSinceMs = 0L
+        blinkMachine.reset()
+        longMachine.reset()
         longClosureCounted = false
         blinkTimesMs.clear()
         blinkCount = 0

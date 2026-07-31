@@ -5,6 +5,36 @@
 > Every optimization gets before/after numbers from committed benchmark files —
 > negative results are kept and reported honestly.
 
+## 2026-08-01 — Phase 4.5: blinks and long closures get separate thresholds
+
+- **What:** `BlinkDetector` now runs two hysteresis state machines. Blinks use
+  `EYE_CLOSE_LEVEL / EYE_OPEN_LEVEL` = **0.30 / 0.18** (was 0.50 / 0.35); long closures keep
+  **0.50 / 0.35** under the new `LONG_CLOSURE_LEVEL / LONG_CLOSURE_OPEN_LEVEL`.
+- **Why:** measured from the committed recordings, real blinks peak at a median depth of
+  0.51 with a p10 tail at 0.28 — so a 0.50 entry level sat exactly on the median blink and
+  detected 19 of the 37 closure events in the focused recording.
+- **Why not simply lower the one pair:** the eye aspect ratio also falls when the user looks
+  *down*. The distracted recording rests at closure 0.192 (p75), so with an exit level below
+  that, blinks never end and arrive as multi-second long closures. Measured, long closures
+  focused/distracted/drowsy with the levels shared: 0/2/14 at 0.50/0.35 but 0/13/16 at
+  0.30/0.18 and 0/17/18 at 0.25/0.15 — and the fatigue flag fired for 60% of a *distracted*
+  session. Splitting the pairs keeps 16.4 blinks/min and 0/2/14.
+- **Before / after** (`BlinkThresholdReport`, `bench/blinks-20260801.txt`):
+
+  | focused | blinks/min | long closures (f/d/dr) | fatigue false-fires |
+  |---|---|---|---|
+  | before | 9.4 | 0 / 2 / 14 | none |
+  | naive retune 0.30/0.18 shared | 16.4 | 0 / 13 / 16 | distracted, 60% |
+  | shipped, split | 16.4 | 0 / 2 / 14 | none |
+
+- **New CI assertion:** focused blink rate must be 3-30/min and non-zero. Every existing
+  replay assertion was a comparison *between* recordings, so a bug suppressing blinks
+  everywhere passed all of them. This is the tripwire for that class.
+- **Also:** `earOpen` (the calibrated open-eye reference) is now in the live panel and every
+  session export. It scales every closure, so when it calibrates low every eye number reads
+  shallow — the leading hypothesis for the 0.219 maximum in the reported session, and
+  previously invisible.
+
 ## 2026-07-31 — Phase 4: the focus score is a weighted sum, and the camera pipeline is shared
 
 - **What:** `FocusScorer` in `:core` fuses three of the Phase 3 signals into 0-100 with a

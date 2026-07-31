@@ -48,8 +48,12 @@ class BlinkDetectorTest {
     @Test
     fun `a score hovering on the threshold does not emit fake blinks`() {
         // Without hysteresis this alternation would count a blink every other sample.
+        // Written against the config rather than literals, so retuning the thresholds
+        // cannot silently stop this from testing what it says it tests.
         var i = 0
-        val d = run(3_000L) { if (i++ % 2 == 0) 0.49 else 0.51 }
+        val below = config.eyeCloseLevel - 0.01
+        val above = config.eyeCloseLevel + 0.01
+        val d = run(3_000L) { if (i++ % 2 == 0) below else above }
         assertEquals(0, d.blinkCount)
     }
 

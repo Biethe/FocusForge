@@ -5,6 +5,73 @@
 > "operator confirmed: &lt;what was seen&gt;". If something is not measured yet, it says
 > `NOT MEASURED YET`.
 
+## 2026-08-01 — Phase 4.5: blink detection was missing half the blinks
+
+**Did**
+- Checked the architect's first question first: **is blink detection actually running on
+  every camera frame?** It is. The code path is written out in `docs/SIGNALS.md` §16.1 —
+  every frame goes through the engine, and only the *export file* is thinned to one row per
+  second, after the counting has already happened.
+- That matters for reading the evidence: the `eyeClosure` column in a session file is a
+  snapshot taken once a second, and a blink only lasts about a seventh of a second. It
+  usually lands between the samples. On our own focused recording the true peak is 0.766 but
+  sampling once a second finds 0.708 and only 15 rows of 115 above 0.1 — so a low maximum in
+  an export tells you much less than it looks like. **But not nothing:** the reported session
+  had 1 row of 64 above 0.1, and that gap is real. Something else was also wrong.
+- Measured what a real blink actually looks like, from the recordings we already have.
+  **Blinks peak at a median depth of 0.51.** The threshold for "the eye is closing" was
+  0.50 — sitting exactly on the median, so it caught about half of them. The focused
+  recording contains 37 visible closures and we were counting 19.
+- Lowering it fixed blinks and broke something worse. The eye-shape measurement also falls
+  when you look **down**, not only when you close your eyes — so during the distracted
+  recording the "eye" sits half-shut all the time. With a lower threshold, blinks never
+  registered as *finishing*, and each one ran on into a multi-second "long closure". The
+  fatigue warning then fired for 60% of a session where you were merely distracted.
+- So the two measurements were **split apart**, because they answer different questions. A
+  blink just needs to be noticed, so it uses a sensitive threshold. A long closure sets off
+  the tiredness alarm, so it keeps the strict one. Both are documented with the measurements
+  behind them.
+
+**Evidence**
+- `bench/blinks-20260801.txt` (committed), from `bench/analyze_blinks.py` and the new
+  `BlinkThresholdReport`, which regenerates the whole comparison on demand.
+
+  | focused recording | blinks/min | long closures f/d/drowsy | false fatigue alarms |
+  |---|---|---|---|
+  | before | 9.4 | 0 / 2 / 14 | none |
+  | naive fix | 16.4 | 0 / 13 / 16 | **distracted, 60% of it** |
+  | shipped | **16.4** | 0 / 2 / 14 | none |
+
+- 89 `:core` tests pass, including a **new tripwire**: a focused reading session must show
+  between 3 and 30 blinks per minute. Everything CI checked before was one recording
+  compared against another, so a bug that hid blinks everywhere passed every test. This one
+  would have caught it.
+- The focus score and the fatigue flag are unchanged on all three recordings: 96.7 / 74.9 /
+  60.7, fatigue only when drowsy.
+
+**Next — what you do**
+1. Install `0.4.1-blinks`. Open **Open camera probe**.
+2. Look at the new `eyes ref` line. **`open EAR` should read about 0.27–0.30.** If it is
+   much lower, the app learned your "open eye" while you were looking down — that would
+   explain the shallow session, and it is the one thing still unexplained.
+3. Tap **Label** to `blinkprobe`, tap **REC**. It stops itself after 30 seconds.
+   - 5 seconds looking normally, then **10 normal blinks** (one every 1.5 s), then
+     **3 slow closures** holding your eyes shut about a second each.
+4. **Share** the file and send it to me. Full instructions in `docs/SIGNALS.md` §16.6.
+
+**Risks**
+- The new thresholds come from your three recordings — the same n=1 caveat as everything
+  else (§14.2). The blink probe is what would catch it if they are wrong for a normal
+  blink rather than a reading blink.
+- **One thing is still unexplained.** The retune accounts for under-counting, but not for
+  that session's maximum closure of 0.219 across 64 seconds. The likely cause is the
+  open-eye calibration landing low, which would make every closure read shallow. It is a
+  hypothesis, marked `NOT MEASURED YET` in §16.5. If you still have that session JSON,
+  send it — it now takes one look at `earOpen` to confirm or kill the idea.
+- Blink rate still does not feed the focus score (§15.8), so none of this moves the score.
+
+---
+
 ## 2026-07-31 — Phase 4: Focus score, fatigue flag, and the Session screen
 
 **Did**

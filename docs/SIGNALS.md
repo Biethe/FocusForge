@@ -769,3 +769,142 @@ The timeline is thinned to one row per second (the pipeline produces about nine)
   the same event would double-count it.
 
 If a later phase adds any of these, the reason should be a new measurement, not a hunch.
+
+---
+
+## 16. Blink detection (Phase 4.5 patch)
+
+A session on 2026-07-31 counted **0 blinks in 64 seconds** with a face visible 99.3% of the
+time. This section is what that turned out to be.
+
+### 16.1 Where blink detection runs, and why the session file cannot show it
+
+**It runs on every landmark frame, at camera rate, inside `:core`.** The path is:
+
+```
+FacePipeline.onLandmarkerResult      (every detector callback, ~9/s)
+  -> SignalMapper.toSample
+  -> SessionActivity.onFaceSample
+       -> SignalEngine.update(sample)          <- EVERY frame
+            -> BlinkDetector.update(t, closure, measurable)
+       -> FocusScorer.update(snapshot)         <- EVERY frame
+       -> SessionBuilder.add(...)              <- thinned to 1 row/second, inside the builder
+```
+
+The 1 Hz thinning happens in `SessionBuilder.add`, *after* the engine has already seen the
+frame. `blinkCount`, `longClosureCount` and every window aggregate are counters accumulated
+at full rate; the per-second row only samples them.
+
+That has a consequence worth stating plainly, because it will mislead anyone reading an
+export: the **`eyeClosure` column in a session file is an instantaneous value sampled once
+per second**, not a maximum. A blink lasts ~130 ms, so roughly one second in eight contains
+one, and the sampled frame usually misses it. Measured on the focused recording: full-rate
+closure peaks at 0.766, but sampling it once per second finds a maximum of 0.708 and only
+15 of 115 rows above 0.1.
+
+So a low `eyeClosure` maximum in an export is **weak** evidence on its own — but it is not
+*no* evidence. 15 of 115 rows over 0.1 is what a normally blinking session looks like at
+1 Hz; the reported session had 1 row of ~64. That gap is real and is not sampling.
+
+### 16.2 What the closure amplitude actually is
+
+Measured from the three committed recordings at full frame rate
+(`bench/analyze_blinks.py`, output in `bench/blinks-20260801.txt`):
+
+| | focused | distracted | drowsy |
+|---|---|---|---|
+| closure peak, whole session | 0.766 | 0.847 | 0.903 |
+| eyeBlink blendshape peak | 0.688 | 0.703 | 0.767 |
+| blink peak depth, p10 / p50 / p90 | 0.28 / 0.51 / 0.65 | — | — |
+| blink duration, p10 / p50 / p90 | 58 / 132 / 282 ms | — | — |
+| resting closure, p75 | 0.000 | **0.192** | 0.589 |
+
+The finding: **`EYE_CLOSE_LEVEL = 0.50` sat exactly on the median blink depth.** The focused
+recording contains 37 visible closure events and the old threshold detected 19 of them —
+about half, by construction.
+
+Note the blendshape column peaks at 0.688–0.767, below its own old 0.80 PERCLOS cutoff.
+Item 3 of the patch request — "switch the closure signal to EAR if blendshape amplitude is
+weak" — was already done in Phase 3.1b for exactly this reason (§5.1). Closure has been
+EAR-based since then, with blendshapes retained as the fallback for frames with no lid
+points. Both are reported in `bench/blinks-20260801.txt` so the comparison stays visible.
+
+### 16.3 Two thresholds, because there are two jobs
+
+The obvious fix — lower the threshold — breaks something else, and the sweep shows it. The
+eye aspect ratio also falls when the user looks **down**, not only when the lid closes. The
+distracted recording (repeatedly glancing at a second phone) rests at a closure of 0.192 at
+p75. With an exit level below that, a 200 ms blink never crosses back into "open" and runs
+on until the head comes up, arriving as a multi-second **long closure** — which feeds the
+fatigue flag.
+
+Long closures for focused / distracted / drowsy, with both levels shared
+(`BlinkThresholdReport`):
+
+```
+  0.50 / 0.35   0 /  2 / 14      blinks/min focused: 9.4
+  0.40 / 0.28   0 /  7 / 15                          11.4
+  0.30 / 0.18   0 / 13 / 16                          16.4
+  0.25 / 0.15   0 / 17 / 18                          16.9
+```
+
+Every setting that catches the blinks destroys the drowsy/distracted separation. At
+0.30/0.18 the fatigue flag fired for **60% of a distracted session** — a false alarm.
+
+So the two are **split**, because they are answering different questions:
+
+| | Enter | Exit | Why |
+|---|---|---|---|
+| **Blink** | 0.30 | 0.18 | A transient dip we only need to notice. Above the p90 of open-eye noise while reading (0.134); catches the shallow p10 tail of real blinks. A spurious blink costs a rounding error on a rate. |
+| **Long closure** | 0.50 | 0.35 | Feeds the fatigue alarm, so it must mean substantially closed for a substantial time. The exit level sits above the 0.192 resting band produced by looking down, so closures cannot get stuck open-ended. |
+
+Result: **16.4 blinks/min** on the focused recording (was 9.4), with long closures still
+0 / 2 / 14 and the fatigue flag still firing only on the drowsy session.
+
+### 16.4 What CI now asserts
+
+Added: **a focused reading session must have a blink rate between 3 and 30 per minute, and
+more than zero blinks.** Deliberately loose — it is not a claim about blink physiology, it
+is a tripwire. Every prior assertion was a *comparison between two recordings*, so a bug
+that suppressed blinks everywhere passed all of them. This one fails if the pipeline stops
+seeing blinks at all, which is the failure that actually happened.
+
+### 16.5 Still open: why that session read so shallow
+
+The retune explains why blinks were **under-counted**. It does not fully explain a maximum
+`eyeClosure` of 0.219 across 64 seconds, which is shallower than the retune accounts for.
+The leading hypothesis is the **open-eye calibration**: closure is `1 - EAR/earOpen` (§3),
+so if `earOpen` is learned while the user is looking down, squinting, or still positioning
+the phone, it lands low and *every* later closure reads shallow — a max of 0.219 is what an
+`earOpen` roughly 25% below the true open eye would produce.
+
+That is a hypothesis, not a finding. `earOpen` is now reported in the live panel and in
+every session export, so the next occurrence is diagnosable at a glance rather than by
+inference. **`NOT MEASURED YET`** until the operator's blink probe (§16.6) confirms or
+refutes it.
+
+### 16.6 The blink probe — what the operator does
+
+Build `0.4.1-blinks` adds a fourth recording label, `blinkprobe`, which stops itself after
+**30 seconds**. A recording already stores the raw `eyeBlinkLeft` / `eyeBlinkRight`
+blendshapes *and* the lid landmarks at full frame rate, so it *is* the full-rate debug
+capture asked for — with the advantage of producing a file to analyse rather than logcat
+text to scrape.
+
+1. Open **Open camera probe**. Sit as you normally would, wait for the green mesh.
+2. Check the `eyes ref` line: `open EAR` should read roughly **0.27–0.30**. If it reads
+   much lower, the calibration caught you looking down — leave the screen and come back to
+   restart it, then check again. This is the §16.5 hypothesis under test.
+3. Tap **Label** until it reads `blinkprobe`. Tap **REC**.
+4. First 5 seconds: look normally at the phone, eyes open.
+5. Then **10 deliberate normal blinks**, about one every 1.5 seconds — normal speed, not
+   exaggerated.
+6. Then **3 slow closures**, each holding the eyes shut for about **1 second**.
+7. It stops itself at 30 s. Tap **Share** and send the file.
+
+Then `python3 bench/analyze_blinks.py <file>` reports the peak depth of every closure it
+finds. Expected if the retune is right: about 13 events, the 10 blinks peaking near
+0.5–0.8 with durations of 100–300 ms, and the 3 slow ones peaking higher with durations
+near 1000 ms. If the peaks come out far shallower than that, the thresholds are still wrong
+and the numbers in §16.3 will be revised from this capture rather than from the three
+labelled sessions.

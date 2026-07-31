@@ -14,17 +14,57 @@ object SignalThresholds {
     // ---------------------------------------------------------------- eye closure
 
     /**
-     * Above this, the eye counts as "closing". 0.50 is the midpoint of MediaPipe's
-     * eyeBlink score: below it the lid is clearly up, above it clearly coming down.
+     * Above this, the eye counts as "closing" — i.e. this much of the eye's opening has
+     * been lost.
+     *
+     * Measured, not chosen (2026-08-01, bench/blinks-20260801.txt): across the three
+     * committed recordings, real blinks peak at a *median* depth of 0.51-0.65 with a p10
+     * tail at 0.28. The previous value of 0.50 therefore sat exactly on the median blink,
+     * and caught only about half of them — the focused recording contains 37 closure
+     * events of which 0.50 detected 19. Open-eye frames sit under 0.134 (p90), so 0.30
+     * clears the noise floor by better than 2x while catching the shallow tail.
      */
-    const val EYE_CLOSE_LEVEL = 0.50
+    const val EYE_CLOSE_LEVEL = 0.30
 
     /**
-     * Below this, the eye counts as "open" again. The 0.15 gap under EYE_CLOSE_LEVEL is
-     * hysteresis: without it a score hovering around 0.50 would emit dozens of fake
-     * blinks per second.
+     * Below this, the eye counts as "open" again. The 0.12 gap under EYE_CLOSE_LEVEL is
+     * hysteresis: without it a value hovering around the close level would emit dozens of
+     * fake blinks per second. Still above the p90 of open-eye noise while reading (0.134).
      */
-    const val EYE_OPEN_LEVEL = 0.35
+    const val EYE_OPEN_LEVEL = 0.18
+
+    /**
+     * Long closures — the drowsiness marker — use their **own, stricter pair**, and this is
+     * not an accident of tuning. The two measurements have different jobs:
+     *
+     * - A blink is a transient dip. We only need to *see* it, so a sensitive threshold is
+     *   right and a spurious one costs a rounding error on a rate.
+     * - A long closure feeds the fatigue alarm. It must mean the eye was substantially
+     *   closed for a substantial time.
+     *
+     * The exit level matters even more than the entry one here. The eye aspect ratio also
+     * falls when the user looks **down**, not only when the lid closes: during the operator's
+     * distracted recording (repeatedly glancing at a second phone) the resting closure sits
+     * at 0.192 at p75. With an exit level below that, a 200 ms blink never crosses back into
+     * "open" and runs on until the head comes up, arriving as a multi-second long closure.
+     *
+     * Measured consequence, from `BlinkThresholdReport` over the three recordings — long
+     * closures for focused / distracted / drowsy:
+     *
+     * ```
+     *   0.50 / 0.35   0 /  2 / 14      <- separation 7x, what long closures use
+     *   0.40 / 0.28   0 /  7 / 15
+     *   0.30 / 0.18   0 / 13 / 16      <- distracted approaching drowsy
+     *   0.25 / 0.15   0 / 17 / 18      <- indistinguishable
+     * ```
+     *
+     * With the levels shared, a first attempt at this retune fired the fatigue flag for 60%
+     * of a *distracted* session. Split, blinks run at 0.30/0.18 and long closures stay at
+     * 0.50/0.35: 16.4 blinks/min when focused, and long closures still 0 / 2 / 14.
+     * Regenerate with `BlinkThresholdReport`.
+     */
+    const val LONG_CLOSURE_LEVEL = 0.50
+    const val LONG_CLOSURE_OPEN_LEVEL = 0.35
 
     /**
      * Starting value for the open-eye aspect ratio, used only until the calibrator has
@@ -169,6 +209,8 @@ object SignalThresholds {
 data class SignalConfig(
     val eyeCloseLevel: Double = SignalThresholds.EYE_CLOSE_LEVEL,
     val eyeOpenLevel: Double = SignalThresholds.EYE_OPEN_LEVEL,
+    val longClosureLevel: Double = SignalThresholds.LONG_CLOSURE_LEVEL,
+    val longClosureOpenLevel: Double = SignalThresholds.LONG_CLOSURE_OPEN_LEVEL,
     val earOpenRef: Double = SignalThresholds.EAR_OPEN_REF,
     val blinkMinMs: Long = SignalThresholds.BLINK_MIN_MS,
     val blinkMaxMs: Long = SignalThresholds.BLINK_MAX_MS,

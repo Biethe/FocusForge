@@ -1,0 +1,117 @@
+Blink amplitude analysis — see docs/SIGNALS.md 16
+
+=== distracted-sm-a202f-20260731-133855.json
+  label distracted   1100 frames   121 s   9.1 fps   calibrated open EAR 0.298
+  closure (EAR-based, full frame rate):  p50=0.086  p90=0.499  p99=0.760  max=0.847
+  eyeBlink blendshape, full frame rate:  p50=0.189  p90=0.501  p99=0.666  max=0.703
+  --- if sampled once per second, as the session export does:
+      max=0.780   samples over 0.1: 49 of 113
+      (full rate max is 0.847 — the 1 Hz column understates it 1.1x)
+  --- closure events by threshold (what EYE_CLOSE_LEVEL would catch)
+       level  events  blink-length  per min  peak-depth p50/p90
+        0.20      65            41     20.4  0.58 / 0.76
+        0.25      66            43     21.4  0.60 / 0.76
+        0.30      65            52     25.9  0.61 / 0.76
+        0.35      62            45     22.4  0.62 / 0.77
+        0.40      61            39     19.4  0.63 / 0.77
+        0.45      55            36     17.9  0.64 / 0.78
+        0.50      51            30     14.9  0.65 / 0.78
+        0.60      37            13      6.5  0.70 / 0.79
+        0.70      19             9      4.5  0.75 / 0.81
+        0.80       2             1      0.5  0.85 / 0.85
+  --- deepest 10 closure events (threshold 0.20), of 65 total
+      t=  63896 ms  duration= 723 ms  peak closure=0.847  peak eyeBlink=0.703
+      t=  27640 ms  duration=1066 ms  peak closure=0.799  peak eyeBlink=0.675
+      t= 116098 ms  duration=1548 ms  peak closure=0.791  peak eyeBlink=0.669
+      t=  18993 ms  duration= 481 ms  peak closure=0.780  peak eyeBlink=0.666
+      t=  54848 ms  duration= 405 ms  peak closure=0.772  peak eyeBlink=0.612
+      t=  70363 ms  duration=1162 ms  peak closure=0.765  peak eyeBlink=0.674
+      t=  55458 ms  duration= 892 ms  peak closure=0.763  peak eyeBlink=0.605
+      t= 118543 ms  duration= 403 ms  peak closure=0.753  peak eyeBlink=0.607
+      t=  32115 ms  duration= 631 ms  peak closure=0.743  peak eyeBlink=0.619
+      t= 117943 ms  duration= 301 ms  peak closure=0.732  peak eyeBlink=0.590
+      depth:    p10=0.27  p50=0.58  p90=0.76
+      duration: p10=16  p50=206  p90=806 ms
+
+=== drowsy-sm-a202f-20260731-134140.json
+  label drowsy   1112 frames   121 s   9.2 fps   calibrated open EAR 0.293
+  closure (EAR-based, full frame rate):  p50=0.105  p90=0.820  p99=0.877  max=0.903
+  eyeBlink blendshape, full frame rate:  p50=0.157  p90=0.724  p99=0.756  max=0.767
+  --- if sampled once per second, as the session export does:
+      max=0.881   samples over 0.1: 57 of 113
+      (full rate max is 0.903 — the 1 Hz column understates it 1.0x)
+  --- closure events by threshold (what EYE_CLOSE_LEVEL would catch)
+       level  events  blink-length  per min  peak-depth p50/p90
+        0.20      37            21     10.4  0.65 / 0.87
+        0.25      36            19      9.4  0.65 / 0.87
+        0.30      36            20      9.9  0.65 / 0.87
+        0.35      35            18      8.9  0.66 / 0.87
+        0.40      33            16      7.9  0.69 / 0.88
+        0.45      31            11      5.5  0.70 / 0.88
+        0.50      31            10      5.0  0.70 / 0.88
+        0.60      22             8      4.0  0.76 / 0.88
+        0.70      15             0      0.0  0.84 / 0.89
+        0.80       9             1      0.5  0.86 / 0.90
+  --- deepest 10 closure events (threshold 0.20), of 37 total
+      t=  94316 ms  duration=2011 ms  peak closure=0.903  peak eyeBlink=0.749
+      t= 107411 ms  duration=3923 ms  peak closure=0.897  peak eyeBlink=0.761
+      t=  20278 ms  duration=2658 ms  peak closure=0.883  peak eyeBlink=0.745
+      t=  34231 ms  duration=3904 ms  peak closure=0.881  peak eyeBlink=0.767
+      t= 102595 ms  duration=3354 ms  peak closure=0.858  peak eyeBlink=0.761
+      t=  25813 ms  duration=3345 ms  peak closure=0.854  peak eyeBlink=0.739
+      t=  76208 ms  duration=3559 ms  peak closure=0.846  peak eyeBlink=0.741
+      t=  85432 ms  duration=1747 ms  peak closure=0.842  peak eyeBlink=0.747
+      t=  17768 ms  duration= 233 ms  peak closure=0.795  peak eyeBlink=0.706
+      t=  56277 ms  duration=3769 ms  peak closure=0.789  peak eyeBlink=0.713
+      depth:    p10=0.36  p50=0.65  p90=0.87
+      duration: p10=123  p50=419  p90=3643 ms
+
+=== focused-sm-a202f-20260731-133556.json
+  label focused   1161 frames   121 s   9.6 fps   calibrated open EAR 0.274
+  closure (EAR-based, full frame rate):  p50=0.000  p90=0.134  p99=0.614  max=0.766
+  eyeBlink blendshape, full frame rate:  p50=0.055  p90=0.220  p99=0.603  max=0.688
+  --- if sampled once per second, as the session export does:
+      max=0.708   samples over 0.1: 15 of 115
+      (full rate max is 0.766 — the 1 Hz column understates it 1.1x)
+  --- closure events by threshold (what EYE_CLOSE_LEVEL would catch)
+       level  events  blink-length  per min  peak-depth p50/p90
+        0.20      37            34     16.9  0.51 / 0.65
+        0.25      34            30     14.9  0.52 / 0.65
+        0.30      32            25     12.4  0.52 / 0.65
+        0.35      27            21     10.4  0.55 / 0.68
+        0.40      23            19      9.4  0.57 / 0.71
+        0.45      21            16      7.9  0.60 / 0.73
+        0.50      19            10      5.0  0.60 / 0.73
+        0.60      11             4      2.0  0.64 / 0.74
+        0.70       3             1      0.5  0.74 / 0.76
+        0.80       0             0      0.0  -
+  --- deepest 10 closure events (threshold 0.20), of 37 total
+      t=  77110 ms  duration= 158 ms  peak closure=0.766  peak eyeBlink=0.688
+      t=  35606 ms  duration= 161 ms  peak closure=0.740  peak eyeBlink=0.673
+      t=  22604 ms  duration=  88 ms  peak closure=0.731  peak eyeBlink=0.674
+      t= 115113 ms  duration=  80 ms  peak closure=0.651  peak eyeBlink=0.623
+      t=   5726 ms  duration= 415 ms  peak closure=0.645  peak eyeBlink=0.621
+      t=  93811 ms  duration= 213 ms  peak closure=0.643  peak eyeBlink=0.625
+      t=   3064 ms  duration= 221 ms  peak closure=0.642  peak eyeBlink=0.635
+      t=  24763 ms  duration= 228 ms  peak closure=0.619  peak eyeBlink=0.579
+      t=  12433 ms  duration= 340 ms  peak closure=0.618  peak eyeBlink=0.602
+      t=  13472 ms  duration= 359 ms  peak closure=0.605  peak eyeBlink=0.602
+      depth:    p10=0.28  p50=0.51  p90=0.65
+      duration: p10=58  p50=132  p90=282 ms
+    === Blink threshold sweep (real engine, operator's recordings)
+       Want: focused blink rate in a human 3-30/min band, long closures near
+       zero when focused, clearly highest when drowsy, and not inflated when
+       distracted (that would be a look-down artifact, not a closure).
+                                     blinks/min              long closures
+       close/open       focus    distr   drowsy    focus    distr   drowsy
+       -- one shared machine (the design this patch replaced)
+       0.50 / 0.35        9.4     22.4      7.4        0        2       14
+       0.45 / 0.30       10.9     20.9      7.4        0        6       14
+       0.40 / 0.28       11.4     22.9      7.9        0        7       15
+       0.35 / 0.25       13.9     19.9      8.4        0       11       15
+       0.35 / 0.20       13.9     16.9      7.9        0       14       15
+       0.30 / 0.20       16.4     19.4      8.4        0       14       15
+       0.30 / 0.18       16.4     17.9      7.9        0       13       16
+       0.25 / 0.15       16.9     15.9      6.5        0       17       18
+       -- two machines (shipped): blinks 0.30/0.18, long closures 0.50/0.35
+       shipped           16.4     17.9      7.9        0        2       14

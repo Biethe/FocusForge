@@ -61,6 +61,8 @@ data class SessionSample(
     val headYawDevDeg: Double? = null,
     val headPitchDevDeg: Double? = null,
     val yawnCount: Int,
+    /** The calibrated open-eye reference these closures are measured against (§3). */
+    val earOpen: Double = 0.0,
 )
 
 /** Whole-session totals, flattened for the export. */
@@ -145,6 +147,7 @@ class SessionBuilder(
             headYawDevDeg = snapshot.headYawDevDeg?.let { round3(it) },
             headPitchDevDeg = snapshot.headPitchDevDeg?.let { round3(it) },
             yawnCount = snapshot.yawnCount,
+            earOpen = round3(snapshot.earOpen),
         )
     }
 

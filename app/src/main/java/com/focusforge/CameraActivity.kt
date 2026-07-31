@@ -291,6 +291,10 @@ class CameraActivity : ComponentActivity() {
 
     private fun isRecording(): Boolean = synchronized(recordLock) { recorder != null }
 
+    /** The blink probe stops at 30 s; the labelled sessions run the full two minutes. */
+    private fun recordingLimitMs(): Long =
+        if (LABELS[labelIndex] == BLINK_PROBE_LABEL) BLINK_PROBE_MAX_MS else RECORD_MAX_MS
+
     private fun startRecording() {
         val snapshot = latestSnapshot
         if (snapshot == null) {
@@ -311,7 +315,8 @@ class CameraActivity : ComponentActivity() {
         }
         recordingStartedUptimeMs = SystemClock.uptimeMillis()
         updateButtons()
-        toast("Recording \"${LABELS[labelIndex]}\" — stops automatically after 2 minutes")
+        toast("Recording \"${LABELS[labelIndex]}\" — stops automatically after " +
+            "${recordingLimitMs() / 1000} seconds")
     }
 
     private fun stopRecording(auto: Boolean) {
@@ -373,7 +378,7 @@ class CameraActivity : ComponentActivity() {
             logText.text = logLines.joinToString("\n")
 
             if (isRecording() &&
-                SystemClock.uptimeMillis() - recordingStartedUptimeMs >= RECORD_MAX_MS) {
+                SystemClock.uptimeMillis() - recordingStartedUptimeMs >= recordingLimitMs()) {
                 stopRecording(auto = true)
             }
             hudHandler.postDelayed(this, 1000L)
@@ -389,7 +394,7 @@ class CameraActivity : ComponentActivity() {
             else "record    ● %s  %d frames  %.0f s / %d s".format(
                 Locale.US, LABELS[labelIndex], r.frameCount,
                 (SystemClock.uptimeMillis() - recordingStartedUptimeMs) / 1000.0,
-                RECORD_MAX_MS / 1000)
+                recordingLimitMs() / 1000)
         }
         return buildString {
             appendLine(if (s.calibrated) "baseline  calibrated" else "baseline  calibrating…")
@@ -433,6 +438,8 @@ class CameraActivity : ComponentActivity() {
         return buildString {
             appendLine("eyes raw  L %s  R %s  avg %s  EAR %s  bs %d".format(
                 Locale.US, f2(d.left), f2(d.right), f2(d.avg), f2(d.ear), d.blendshapeCount))
+            appendLine("eyes ref  open EAR %.3f (calibrated)".format(
+                Locale.US, latestSnapshot?.earOpen ?: 0.0))
             appendLine("eyes peak L %.2f  R %.2f  avg %.2f (P80=0.80)  EAR %s..%s  [tap=reset]".format(
                 Locale.US, d.peakLeft, d.peakRight, d.peakAvg,
                 f2(if (d.earClosed == Double.MAX_VALUE) null else d.earClosed), f2(d.earOpen)))
@@ -472,10 +479,19 @@ class CameraActivity : ComponentActivity() {
         const val CAMERA_REQUEST = 1
         const val LOG_LINES = 4
 
-        /** The three labelled sessions the replay tests expect. */
-        val LABELS = listOf("focused", "distracted", "drowsy")
+        /**
+         * The three labelled sessions the replay tests expect, plus the blink probe — a
+         * short capture used to measure closure amplitude directly (docs/SIGNALS.md §16.2).
+         * A recording already stores raw blendshapes *and* lid landmarks at full frame
+         * rate, so it is the full-rate debug capture; no separate logging path is needed.
+         */
+        val LABELS = listOf("focused", "distracted", "drowsy", "blinkprobe")
 
         /** Recordings stop themselves so the operator's protocol is impossible to get wrong. */
         const val RECORD_MAX_MS = 120_000L
+
+        /** The blink probe is a 30 s exercise, not a 2-minute session. */
+        const val BLINK_PROBE_MAX_MS = 30_000L
+        const val BLINK_PROBE_LABEL = "blinkprobe"
     }
 }

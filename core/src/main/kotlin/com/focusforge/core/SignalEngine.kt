@@ -41,6 +41,13 @@ data class SignalSnapshot(
     val headStable: Boolean,
 
     val yawnCount: Int,
+    /**
+     * The calibrated open-eye aspect ratio every closure is measured against (§3). Exposed
+     * because it *scales* every eye number: if calibration happens while the user is
+     * looking down or squinting, this lands low and every later closure reads shallow.
+     * Having it in the export makes that failure visible instead of mysterious.
+     */
+    val earOpen: Double = 0.0,
 )
 
 /** Whole-run totals, used by the replay summaries rather than the rolling snapshots. */
@@ -158,6 +165,7 @@ class SignalEngine(private val config: SignalConfig = SignalConfig()) {
             headStabilityDeg = spread,
             headStable = spread <= config.headStableMaxDeg,
             yawnCount = yawn.yawnCount,
+            earOpen = baseline.earOpen,
         )
     }
 
