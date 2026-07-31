@@ -183,11 +183,107 @@ def analyze(path):
                   "this measure for this recording.")
 
 
+MAX_FRAME_WEIGHT_MS = 500  # mirrors SignalThresholds.MAX_FRAME_WEIGHT_MS
+BASELINE_CALIBRATION_MS = 5000  # mirrors SignalThresholds.BASELINE_CALIBRATION_MS
+
+
+def open_reference(rows):
+    """The user's open-eye EAR, learned the way the app learns its baseline.
+
+    Median of the calibration window rather than the mean, so a blink during those five
+    seconds does not drag the reference down — same reasoning as BaselineCalibrator.
+    """
+    start = rows[0][0]
+    window = sorted(e for t, _, e in rows
+                    if e is not None and t - start <= BASELINE_CALIBRATION_MS)
+    if not window:
+        return None
+    return percentile(window, 50)
+
+
+def time_fraction(rows, is_closed):
+    """Time-weighted fraction, the same arithmetic TimeWeightedWindow does.
+
+    Frame-counting would answer a different question: the camera runs at ~9 fps here and
+    Phase 6 will duty-cycle it lower still.
+    """
+    total = 0.0
+    closed = 0.0
+    previous_t = None
+    for t, blink, ear in rows:
+        if previous_t is None:
+            previous_t = t
+            continue
+        weight = min(max(t - previous_t, 0), MAX_FRAME_WEIGHT_MS)
+        previous_t = t
+        verdict = is_closed(blink, ear)
+        if verdict is None:  # unmeasurable: excluded, not counted as open
+            continue
+        total += weight
+        if verdict:
+            closed += weight
+    return (closed / total) if total > 0 else float("nan")
+
+
+def sweep(paths):
+    """PERCLOS under every candidate definition, on every recording.
+
+    Two families are compared. `blink>=C` thresholds MediaPipe's confidence score directly,
+    which is what the code does today. `aperture>=P` is the literature's actual P-level
+    definition — the eye counts as closed when its opening has lost P of the height it has
+    when open — computed from the lid landmarks against the user's own calibrated open eye.
+    """
+    loaded = []
+    for path in paths:
+        recording = json.loads(Path(path).read_text())
+        rows = list(frame_values(recording))
+        reference = open_reference(rows) if rows else None
+        if not rows or not reference:
+            print(f"skipping {path}: no usable frames")
+            continue
+        loaded.append((recording.get("label", "?"), rows, reference))
+    if not loaded:
+        return
+
+    labels = [label for label, _, _ in loaded]
+    print("\n\n=== Candidate PERCLOS definitions")
+    print("Fraction of measurable time counted as 'eyes closed', time-weighted.")
+    for label, _, reference in loaded:
+        print(f"  calibrated open-eye EAR, {label}: {reference:.3f}")
+    print(f"\n  {'definition':<20}" + "".join(f"{label:>13}" for label in labels)
+          + f"{'drowsy/focused':>16}")
+
+    def row(name, is_closed):
+        values = {}
+        for label, rows, reference in loaded:
+            values[label] = time_fraction(rows, lambda b, e: is_closed(b, e, reference))
+        cells = "".join(f"{values[label]:>13.3f}" for label in labels)
+        ratio = ""
+        if values.get("focused", 0) > 0 and "drowsy" in values:
+            ratio = f"{values['drowsy'] / values['focused']:>16.1f}x"
+        elif "drowsy" in values:
+            ratio = f"{'drowsy>0, focused=0':>16}"
+        print(f"  {name:<20}{cells}{ratio}")
+
+    for cutoff in [0.40, 0.45, 0.50, 0.55, 0.60, 0.65, 0.70, 0.80]:
+        row(f"blink >= {cutoff:.2f}",
+            lambda b, e, ref, c=cutoff: None if b is None else b >= c)
+    print()
+    for level in [0.60, 0.65, 0.70, 0.75, 0.80, 0.85]:
+        row(f"aperture >= {level:.2f}",
+            lambda b, e, ref, p=level: None if e is None else (1.0 - e / ref) >= p)
+
+    print("\n  Read the ratio column: a definition that cannot separate a drowsy session")
+    print("  from a focused one is useless to us no matter how principled it looks.")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("recordings", nargs="+", help="recording JSON files")
     parser.add_argument("--out", help="also write this report to a file")
+    parser.add_argument("--sweep", action="store_true",
+                        help="also compare candidate PERCLOS definitions across the files")
     args = parser.parse_args()
 
     output = []
@@ -206,6 +302,8 @@ def main():
     print("Measured from committed recordings; no thresholds are applied or implied.")
     for path in args.recordings:
         analyze(path)
+    if args.sweep:
+        sweep(args.recordings)
 
     if args.out:
         sys.stdout = sys.__stdout__

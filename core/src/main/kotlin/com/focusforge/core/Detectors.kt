@@ -183,6 +183,7 @@ class BaselineCalibrator(private val config: SignalConfig) {
     private val yaws = ArrayList<Double>()
     private val pitches = ArrayList<Double>()
     private val irisRatios = ArrayList<Double>()
+    private val ears = ArrayList<Double>()
     private var firstTimestampMs: Long? = null
 
     var calibrated = false
@@ -194,7 +195,19 @@ class BaselineCalibrator(private val config: SignalConfig) {
     var irisRatio = 0.0
         private set
 
-    fun update(timestampMs: Long, orientation: Orientation?, irisH: Double?) {
+    /**
+     * The eye aspect ratio of *this user's* open eye, which is what eye closure is measured
+     * against (see [SignalEngine]). Eye shape varies enough between people, and with the
+     * distance to the stand, that a fixed reference is meaningless; before any face has
+     * been seen it holds [SignalConfig.earOpenRef] as a starting value.
+     *
+     * Median for the same reason as the pose values: the calibration window contains
+     * blinks, and a mean would let them pull the open reference down.
+     */
+    var earOpen = config.earOpenRef
+        private set
+
+    fun update(timestampMs: Long, orientation: Orientation?, irisH: Double?, ear: Double?) {
         if (calibrated) return
         val start = firstTimestampMs ?: timestampMs.also { firstTimestampMs = it }
         if (orientation != null) {
@@ -202,10 +215,15 @@ class BaselineCalibrator(private val config: SignalConfig) {
             pitches += orientation.pitchDeg
         }
         if (irisH != null) irisRatios += irisH
+        if (ear != null && ear > 0.0) ears += ear
 
         yawDeg = median(yaws)
         pitchDeg = median(pitches)
         irisRatio = median(irisRatios)
+        // One frame must not be allowed to define "open": a session that starts mid-blink
+        // would set the reference to a shut eye and then read every closure as zero. Until
+        // there are enough samples for a meaningful median, the literature default stands.
+        if (ears.size >= config.baselineMinSamples) earOpen = median(ears)
 
         val enoughTime = timestampMs - start >= config.baselineCalibrationMs
         val enoughSamples = yaws.size >= config.baselineMinSamples
@@ -213,10 +231,11 @@ class BaselineCalibrator(private val config: SignalConfig) {
     }
 
     fun reset() {
-        yaws.clear(); pitches.clear(); irisRatios.clear()
+        yaws.clear(); pitches.clear(); irisRatios.clear(); ears.clear()
         firstTimestampMs = null
         calibrated = false
         yawDeg = 0.0; pitchDeg = 0.0; irisRatio = 0.0
+        earOpen = config.earOpenRef
     }
 
     private fun median(values: List<Double>): Double {

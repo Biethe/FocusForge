@@ -200,16 +200,41 @@ class SignalEngineTest {
     // ------------------------------------------------------------------ fallbacks
 
     @Test
-    fun `eye closure falls back to the aspect ratio when blendshapes are missing`() {
+    fun `eye closure is measured against this users own open eye`() {
+        // Someone whose open eye is narrower than the 0.28 default. Once calibrated, their
+        // wide-open eye must still read ~0 closed and their shut eye ~1 — the whole point
+        // of a relative measure (docs/SIGNALS.md 3).
+        val engine = SignalEngine()
+        var open = 0.0
+        for (t in 0L..6_000L step 100L) {
+            open = engine.update(Synthetic.sample(t, ear = 0.20)).eyeClosure!!
+        }
+        val shut = engine.update(Synthetic.sample(6_100L, ear = 0.02)).eyeClosure!!
+        assertTrue(open < 0.05, "this user's open eye should read as open, read $open")
+        assertTrue(shut > 0.85, "this user's shut eye should read as shut, read $shut")
+        assertTrue(shut >= SignalThresholds.PERCLOS_CLOSED_LEVEL,
+            "a shut eye must be able to reach P80 — the bug that made PERCLOS read 0.000")
+    }
+
+    @Test
+    fun `one opening frame cannot define the open eye`() {
+        // A session that starts mid-blink must not calibrate "open" to a shut eye and then
+        // report every closure as zero for the rest of the session.
+        val shut = SignalEngine().update(Synthetic.sample(0L, ear = 0.03)).eyeClosure!!
+        assertTrue(shut > 0.85, "a first frame with shut eyes read $shut")
+    }
+
+    @Test
+    fun `eye closure falls back to the blendshape when the lid points are missing`() {
         val open = SignalEngine().update(
-            Synthetic.sample(0L, withBlendshapes = false, ear = 0.30),
+            Synthetic.sample(0L, closure = 0.05, withLandmarks = false),
         ).eyeClosure
         val shut = SignalEngine().update(
-            Synthetic.sample(0L, withBlendshapes = false, ear = 0.10),
+            Synthetic.sample(0L, closure = 0.95, withLandmarks = false),
         ).eyeClosure
         assertNotNull(open); assertNotNull(shut)
-        assertTrue(open < 0.2, "open eyes read $open")
-        assertTrue(shut > 0.9, "shut eyes read $shut")
+        assertEquals(0.05, open, 1e-6, "the blendshape average is used as-is")
+        assertEquals(0.95, shut, 1e-6)
     }
 
     @Test

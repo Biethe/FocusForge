@@ -27,13 +27,16 @@ object SignalThresholds {
     const val EYE_OPEN_LEVEL = 0.35
 
     /**
-     * Eye-aspect-ratio value treated as fully open when blendshapes are unavailable.
-     * Typical open-eye EAR in the literature sits around 0.25-0.30.
+     * Starting value for the open-eye aspect ratio, used only until the calibrator has
+     * seen a face — after that, eye closure is measured against *this user's* own open eye
+     * (BaselineCalibrator.earOpen), because eye shape and distance to the stand vary far
+     * too much between people for a fixed number to mean anything.
+     *
+     * 0.28 is the typical open-eye EAR in the literature, and the operator's three
+     * recordings calibrated to 0.274, 0.293 and 0.298 — close enough that a first frame
+     * measured against it is not wildly wrong (bench/replays, 2026-07-31).
      */
     const val EAR_OPEN_REF = 0.28
-
-    /** EAR value treated as fully closed in the same fallback. Closed eyes measure ~0.10-0.15. */
-    const val EAR_CLOSED_REF = 0.13
 
     // ---------------------------------------------------------------- blinks
 
@@ -63,7 +66,11 @@ object SignalThresholds {
 
     /**
      * PERCLOS-P80, the standard definition: the fraction of time the eyes are at least
-     * 80% closed. We use MediaPipe's eyeBlink score directly as the "percent closed".
+     * 80% closed. The 0.80 is the literature's, unchanged and unfitted — what changed
+     * (2026-07-31) is what it is applied to. It now tests a real aperture ratio measured
+     * from the lid landmarks; it used to test MediaPipe's eyeBlink confidence score, which
+     * peaks at 0.73 on the A20e and so made this cutoff unreachable. See docs/SIGNALS.md
+     * §5.1 for the measurements and bench/analyze_eye_scale.py for the sweep.
      */
     const val PERCLOS_CLOSED_LEVEL = 0.80
 
@@ -163,7 +170,6 @@ data class SignalConfig(
     val eyeCloseLevel: Double = SignalThresholds.EYE_CLOSE_LEVEL,
     val eyeOpenLevel: Double = SignalThresholds.EYE_OPEN_LEVEL,
     val earOpenRef: Double = SignalThresholds.EAR_OPEN_REF,
-    val earClosedRef: Double = SignalThresholds.EAR_CLOSED_REF,
     val blinkMinMs: Long = SignalThresholds.BLINK_MIN_MS,
     val blinkMaxMs: Long = SignalThresholds.BLINK_MAX_MS,
     val blinkRateWindowMs: Long = SignalThresholds.BLINK_RATE_WINDOW_MS,

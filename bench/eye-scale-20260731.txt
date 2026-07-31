@@ -1,0 +1,81 @@
+Eye-signal scale analysis - see docs/SIGNALS.md 5.1
+Measured from committed recordings; no thresholds are applied or implied.
+
+=== distracted-sm-a202f-20260731-133855.json
+  label distracted   device samsung SM-A202F   app 0.3.1-eyediag
+  1100 frames, 1100 with a face (100%), 121 s, 9.1 fps
+  open-eye EAR reference (p90) 0.319; a frame counts as closed below 0.128
+  80 closed frames ~ 8.8 s (7.3% of measurable time)
+  --- eyes OPEN
+  eyeBlink mean          n=1020  p1=0.025  p5=0.035  p10=0.042  p25=0.097  p50=0.176  p75=0.330  p90=0.435  p95=0.482  p99=0.578
+  EAR                    n=1020  p1=0.134  p5=0.166  p10=0.201  p25=0.253  p50=0.276  p75=0.306  p90=0.320  p95=0.328  p99=0.359
+                         min=0.128  max=0.380
+  --- eyes CLOSED
+  eyeBlink mean          n=80    p1=0.464  p5=0.482  p10=0.524  p25=0.551  p50=0.596  p75=0.629  p90=0.673  p95=0.682  p99=0.699
+  EAR                    n=80    p1=0.046  p5=0.060  p10=0.068  p25=0.079  p50=0.094  p75=0.113  p90=0.122  p95=0.124  p99=0.127
+                         min=0.046  max=0.127
+  --- separation
+  eyeBlink: open p95=0.482  closed p5=0.482  closed median=0.596
+  A usable cutoff sits above the open p95 and below the closed p5.
+  WARNING: the two populations overlap - no clean cutoff exists on this measure for this recording.
+
+=== drowsy-sm-a202f-20260731-134140.json
+  label drowsy   device samsung SM-A202F   app 0.3.1-eyediag
+  1112 frames, 1112 with a face (100%), 121 s, 9.2 fps
+  open-eye EAR reference (p90) 0.314; a frame counts as closed below 0.125
+  290 closed frames ~ 31.5 s (26.1% of measurable time)
+  --- eyes OPEN
+  eyeBlink mean          n=822   p1=0.033  p5=0.039  p10=0.044  p25=0.073  p50=0.112  p75=0.189  p90=0.420  p95=0.540  p99=0.577
+  EAR                    n=822   p1=0.130  p5=0.142  p10=0.180  p25=0.251  p50=0.277  p75=0.299  p90=0.317  p95=0.321  p99=0.331
+                         min=0.125  max=0.364
+  --- eyes CLOSED
+  eyeBlink mean          n=290   p1=0.505  p5=0.550  p10=0.580  p25=0.620  p50=0.705  p75=0.734  p90=0.746  p95=0.752  p99=0.766
+  EAR                    n=290   p1=0.033  p5=0.037  p10=0.041  p25=0.048  p50=0.065  p75=0.096  p90=0.116  p95=0.120  p99=0.124
+                         min=0.029  max=0.125
+  --- separation
+  eyeBlink: open p95=0.540  closed p5=0.550  closed median=0.705
+  A usable cutoff sits above the open p95 and below the closed p5.
+
+=== focused-sm-a202f-20260731-133556.json
+  label focused   device samsung SM-A202F   app 0.3.1-eyediag
+  1161 frames, 1161 with a face (100%), 121 s, 9.6 fps
+  open-eye EAR reference (p90) 0.318; a frame counts as closed below 0.127
+  27 closed frames ~ 2.8 s (2.3% of measurable time)
+  --- eyes OPEN
+  eyeBlink mean          n=1134  p1=0.032  p5=0.037  p10=0.039  p25=0.046  p50=0.054  p75=0.076  p90=0.195  p95=0.304  p99=0.491
+  EAR                    n=1134  p1=0.149  p5=0.216  p10=0.247  p25=0.295  p50=0.306  p75=0.314  p90=0.318  p95=0.321  p99=0.326
+                         min=0.130  max=0.329
+  --- eyes CLOSED
+  eyeBlink mean          n=27    p1=0.539  p5=0.555  p10=0.564  p25=0.573  p50=0.602  p75=0.624  p90=0.655  p95=0.674  p99=0.684
+  EAR                    n=27    p1=0.066  p5=0.072  p10=0.078  p25=0.098  p50=0.107  p75=0.118  p90=0.122  p95=0.125  p99=0.127
+                         min=0.064  max=0.127
+  --- separation
+  eyeBlink: open p95=0.304  closed p5=0.555  closed median=0.602
+  A usable cutoff sits above the open p95 and below the closed p5.
+
+
+=== Candidate PERCLOS definitions
+Fraction of measurable time counted as 'eyes closed', time-weighted.
+  calibrated open-eye EAR, distracted: 0.298
+  calibrated open-eye EAR, drowsy: 0.293
+  calibrated open-eye EAR, focused: 0.274
+
+  definition             distracted       drowsy      focused  drowsy/focused
+  blink >= 0.40               0.193        0.345        0.054             6.4x
+  blink >= 0.45               0.149        0.327        0.042             7.7x
+  blink >= 0.50               0.100        0.313        0.033             9.6x
+  blink >= 0.55               0.067        0.277        0.024            11.6x
+  blink >= 0.60               0.037        0.214        0.014            15.4x
+  blink >= 0.65               0.013        0.180        0.002            85.3x
+  blink >= 0.70               0.001        0.136        0.000drowsy>0, focused=0
+  blink >= 0.80               0.000        0.000        0.000drowsy>0, focused=0
+
+  aperture >= 0.60            0.060        0.242        0.015            16.6x
+  aperture >= 0.65            0.045        0.209        0.005            40.1x
+  aperture >= 0.70            0.031        0.178        0.003            65.4x
+  aperture >= 0.75            0.014        0.153        0.001           219.9x
+  aperture >= 0.80            0.003        0.118        0.000drowsy>0, focused=0
+  aperture >= 0.85            0.000        0.042        0.000drowsy>0, focused=0
+
+  Read the ratio column: a definition that cannot separate a drowsy session
+  from a focused one is useless to us no matter how principled it looks.

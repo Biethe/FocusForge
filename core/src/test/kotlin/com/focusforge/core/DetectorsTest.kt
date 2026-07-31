@@ -164,7 +164,7 @@ class BaselineCalibratorTest {
         for (t in 0L..6_000L step 100L) {
             // Sitting with the head turned 12 deg and tilted down 8 deg, plus one glance away.
             val yaw = if (t in 2_000L..2_300L) 60.0 else 12.0
-            c.update(t, Orientation(yaw, -8.0, 0.0), irisH = 0.05)
+            c.update(t, Orientation(yaw, -8.0, 0.0), irisH = 0.05, ear = 0.28)
         }
         assertTrue(c.calibrated)
         assertEquals(12.0, c.yawDeg, 0.01, "median ignores the glance")
@@ -175,17 +175,17 @@ class BaselineCalibratorTest {
     @Test
     fun `is not calibrated on too few samples`() {
         val c = BaselineCalibrator(SignalConfig())
-        c.update(0L, Orientation(0.0, 0.0, 0.0), null)
-        c.update(9_000L, Orientation(0.0, 0.0, 0.0), null)
+        c.update(0L, Orientation(0.0, 0.0, 0.0), null, null)
+        c.update(9_000L, Orientation(0.0, 0.0, 0.0), null, null)
         assertTrue(!c.calibrated, "2 samples is not a baseline even after 9 s")
     }
 
     @Test
     fun `stops moving once calibrated`() {
         val c = BaselineCalibrator(SignalConfig())
-        for (t in 0L..6_000L step 100L) c.update(t, Orientation(0.0, 0.0, 0.0), 0.0)
+        for (t in 0L..6_000L step 100L) c.update(t, Orientation(0.0, 0.0, 0.0), 0.0, 0.28)
         val frozen = c.yawDeg
-        for (t in 6_100L..20_000L step 100L) c.update(t, Orientation(45.0, 0.0, 0.0), 0.0)
+        for (t in 6_100L..20_000L step 100L) c.update(t, Orientation(45.0, 0.0, 0.0), 0.0, 0.28)
         assertEquals(frozen, c.yawDeg, 1e-9)
     }
 }

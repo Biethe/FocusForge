@@ -5,6 +5,70 @@
 > "operator confirmed: &lt;what was seen&gt;". If something is not measured yet, it says
 > `NOT MEASURED YET`.
 
+## 2026-07-31 — Phase 3.1b: PERCLOS fixed, and the replay tests are real
+
+**Did**
+- The operator made the three 2-minute recordings and they are committed in
+  `bench/replays/`. A face was visible **100%** of the time in all three — better than the
+  50% the tests require.
+- Measured what the eye numbers actually do across those four minutes of real behaviour,
+  then fixed the bug the measurements pointed at. **The 0.80 cutoff was never the problem.**
+  What was wrong is what we compared against it: MediaPipe's eye-blink score is a
+  confidence value on an arbitrary scale, and we were treating it as "percentage of the eye
+  that is covered". Those are different things, and on this phone that score tops out at
+  0.73 — so a rule saying "count it when at least 80% closed" could never fire.
+- Eye closure is now measured from the *shape of the eyelids*: how far the eye opening has
+  closed compared with how wide it is when open. That is a real percentage, so the standard
+  0.80 line means what it says. **The threshold was not changed** — we fixed the input.
+- It is measured against **your own** open eye, learned during the same 5-second
+  calibration that already learns your neutral head position. The three recordings
+  calibrated to 0.274, 0.293 and 0.298 — close to each other, which is a good sign the
+  calibration is stable, and different enough from a textbook value to be worth learning.
+- Found and fixed a related weakness while testing: one frame could previously define what
+  "open" means, so a session starting mid-blink would have read every closure as zero. Ten
+  samples are now required. There is a test.
+
+**Evidence**
+- 66 `:core` tests pass locally, including the **three replay assertions that were skipped
+  until today**. Whole-run numbers from the operator's recordings:
+
+  | | focused | distracted | drowsy |
+  |---|---|---|---|
+  | face visible | 1.00 | 1.00 | 1.00 |
+  | PERCLOS | 0.000 | 0.003 | **0.118** |
+  | gaze on screen | **0.984** | 0.599 | 0.730 |
+  | blinks/min | 9.4 | 22.4 | 7.4 |
+  | long closures | 0 | 3 | **16** |
+  | head movement | 0.4° | 9.4° | 3.5° |
+
+- Before the fix, the PERCLOS row read 0.000 / 0.000 / 0.000 — see `docs/DECISIONS.md`.
+- Analysis output committed at `bench/eye-scale-20260731.txt`, from the committed script
+  `bench/analyze_eye_scale.py --sweep`. CI run: see the commit's `core-tests` job.
+
+**Next**
+- Phase 4: the focus score and the session dashboard. The table above is the input to it.
+- Worth knowing for Phase 4: gaze alone cannot tell drowsy from distracted (0.730 vs 0.599,
+  and shut eyes read as "not on screen"), so the score needs more than one signal.
+- Operator, when convenient: install the next build and confirm PERCLOS now moves on-screen
+  when you close your eyes. Nothing depends on it — the same code path is already proven by
+  the replay tests — but it closes the loop on the original report.
+
+**Risks**
+- **Our PERCLOS reads low, deliberately.** MediaPipe's face mesh does not fully close a
+  shut eye, so the typical frame in a held closure reads 78% closed — just under the 80%
+  line. The drowsy session scored 0.118 where the eyes were actually shut about 26% of the
+  time. We chose to under-report rather than loosen the line to a number picked to make our
+  own output look better. Phase 4 must not treat 0.118 as "only 12% drowsy".
+- At ~9 fps an ordinary blink is one or two frames, so PERCLOS on this phone measures
+  sustained closures rather than blinking. Blink rate covers the rest.
+- **Yawn detection does not work on this device and is not fixed.** Two real yawns were
+  recorded and zero detected: `jawOpen` peaked at 0.612 against a 0.60 line that must be
+  held 1.2 s. It is the same bug as PERCLOS in a different signal, but the geometric fix
+  needs mouth landmarks, which we deliberately do not collect for privacy reasons. That
+  trade is the architect's call, not ours. Yawns are already first on the cut list.
+
+---
+
 ## 2026-07-31 — Phase 3.1: Eye diagnostic (PERCLOS reads 0.000 on the phone)
 
 **Did**

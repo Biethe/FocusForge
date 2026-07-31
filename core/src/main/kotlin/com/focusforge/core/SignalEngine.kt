@@ -88,13 +88,18 @@ class SignalEngine(private val config: SignalConfig = SignalConfig()) {
         lastTimestampMs = t
         samples++
 
-        val closure = eyeClosure(sample)
         val orientation = HeadPose.fromMatrix(sample.matrix)
         val irisH = if (sample.faceVisible) {
             EyeGeometry.irisHorizontalRatio(sample.landmarks, sample.imageWidth)
         } else null
+        val ear = if (sample.faceVisible) {
+            EyeGeometry.meanEyeAspectRatio(sample.landmarks, sample.imageWidth, sample.imageHeight)
+        } else null
 
-        if (sample.faceVisible) baseline.update(t, orientation, irisH)
+        // The baseline sees this frame before closure is measured against it, so that the
+        // very first frame already has an open-eye reference to divide by.
+        if (sample.faceVisible) baseline.update(t, orientation, irisH, ear)
+        val closure = eyeClosure(sample, ear)
 
         val yawDev = orientation?.let { it.yawDeg - baseline.yawDeg }
         val pitchDev = orientation?.let { it.pitchDeg - baseline.pitchDeg }
@@ -183,28 +188,37 @@ class SignalEngine(private val config: SignalConfig = SignalConfig()) {
     }
 
     /**
-     * How closed the eyes are, 0..1.
+     * How closed the eyes are, as **the fraction of the eye's own opening that has been
+     * lost**: 0 = open as wide as this user's calibrated neutral, 1 = shut.
      *
-     * Primary source is MediaPipe's eyeBlink blendshape, averaged over both eyes so that a
-     * one-eye glitch cannot fake a blink. If blendshapes are missing we fall back to the
-     * eye aspect ratio computed straight from the lid landmarks, mapped onto the same 0..1
-     * scale. Null when neither is available.
+     * ```
+     * eyeClosure = 1 - (eye aspect ratio now / this user's open eye aspect ratio)
+     * ```
+     *
+     * Primary source is the geometry of the lid landmarks, because that is a *ratio of
+     * physical aperture* — the quantity PERCLOS and the blink literature are defined
+     * against. MediaPipe's eyeBlink blendshape is a model confidence on an arbitrary
+     * scale, and measurement on the A20e showed it never exceeding 0.73 with the eyes
+     * fully shut, which made the standard P80 cutoff unreachable (docs/SIGNALS.md §5.1).
+     * It is kept as the fallback for frames where the lid points are missing but the
+     * blendshapes are not; both eyes are averaged there so a one-eye glitch cannot fake a
+     * blink. Null when neither source is available.
+     *
+     * Note that the two sources are not on the same scale — that is the entire point — so
+     * a stream that switches between them mid-session will show a step. In practice the
+     * detector emits both or neither.
      */
-    private fun eyeClosure(sample: FaceSample): Double? {
+    private fun eyeClosure(sample: FaceSample, ear: Double?): Double? {
         if (!sample.faceVisible) return null
+        if (ear != null && baseline.earOpen > 0.0) {
+            return (1.0 - ear / baseline.earOpen).coerceIn(0.0, 1.0)
+        }
         val left = sample.blendshapes[Blendshapes.EYE_BLINK_LEFT]?.toDouble()
         val right = sample.blendshapes[Blendshapes.EYE_BLINK_RIGHT]?.toDouble()
         val fromBlendshapes = when {
             left != null && right != null -> (left + right) / 2.0
             else -> left ?: right
         }
-        if (fromBlendshapes != null) return fromBlendshapes.coerceIn(0.0, 1.0)
-
-        val ear = EyeGeometry.meanEyeAspectRatio(
-            sample.landmarks, sample.imageWidth, sample.imageHeight,
-        ) ?: return null
-        val span = config.earOpenRef - config.earClosedRef
-        if (span <= 0.0) return null
-        return ((config.earOpenRef - ear) / span).coerceIn(0.0, 1.0)
+        return fromBlendshapes?.coerceIn(0.0, 1.0)
     }
 }

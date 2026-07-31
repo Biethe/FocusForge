@@ -12,6 +12,9 @@ object Synthetic {
     const val IMAGE_W = 480
     const val IMAGE_H = 640
 
+    /** Eye aspect ratio of the synthetic open eye; matches SignalThresholds.EAR_OPEN_REF. */
+    const val OPEN_EAR = 0.28
+
     private const val EYE_Y = 0.45
     private const val LEFT_OUTER_X = 0.35
     private const val LEFT_INNER_X = 0.45
@@ -22,7 +25,7 @@ object Synthetic {
      * 14 landmarks for a face whose eyes have the given aspect ratio and whose irises sit
      * at [irisRatio] of a half-eye-width from centre (+1 = at the inner-x edge).
      */
-    fun landmarks(ear: Double = 0.28, irisRatio: Double = 0.0): Map<Int, Point3> {
+    fun landmarks(ear: Double = OPEN_EAR, irisRatio: Double = 0.0): Map<Int, Point3> {
         val eyeWidthPx = (LEFT_INNER_X - LEFT_OUTER_X) * IMAGE_W
         // Half the lid separation, converted back to normalized y.
         val halfLidNorm = ear * eyeWidthPx / IMAGE_H / 2.0
@@ -61,9 +64,16 @@ object Synthetic {
         irisRatio: Double = 0.0,
         jawOpen: Double = 0.0,
         faceVisible: Boolean = true,
-        /** Set false to test the eye-aspect-ratio fallback path. */
         withBlendshapes: Boolean = true,
-        ear: Double = 0.28,
+        /** Set false to test the blendshape fallback path (no lid landmarks available). */
+        withLandmarks: Boolean = true,
+        /**
+         * Lid geometry. Defaults to the shape that *matches* [closure] — a synthetic face
+         * whose blendshape said "shut" while its eyelids stayed wide open would be
+         * physically impossible, and since eye closure is now measured from the geometry
+         * (see [SignalEngine]) it would also silently test nothing.
+         */
+        ear: Double = OPEN_EAR * (1.0 - closure),
     ): FaceSample {
         if (!faceVisible) return FaceSample(
             timestampMs = timestampMs,
@@ -83,7 +93,7 @@ object Synthetic {
             faceVisible = true,
             blendshapes = blendshapes,
             matrix = HeadPose.matrixOf(yawDeg, pitchDeg, rollDeg),
-            landmarks = landmarks(ear = ear, irisRatio = irisRatio),
+            landmarks = if (withLandmarks) landmarks(ear = ear, irisRatio = irisRatio) else emptyMap(),
             imageWidth = IMAGE_W,
             imageHeight = IMAGE_H,
         )

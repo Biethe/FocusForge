@@ -5,6 +5,40 @@
 > Every optimization gets before/after numbers from committed benchmark files —
 > negative results are kept and reported honestly.
 
+## 2026-07-31 — Phase 3.1: eye closure is measured geometrically, not from a confidence score
+
+- **What:** `eyeClosure` now comes from the eye aspect ratio of the lid landmarks, divided
+  by the user's own calibrated open-eye ratio (`1 - EAR/EAR_open`). MediaPipe's `eyeBlink`
+  blendshape is demoted to the fallback for frames with no lid points. `BaselineCalibrator`
+  learns `earOpen` alongside the neutral pose; `EAR_CLOSED_REF` is deleted.
+- **Why:** `PERCLOS_CLOSED_LEVEL = 0.80` was being applied to a model confidence as though
+  it were a percentage of eyelid aperture. On the A20e that score peaks at 0.73 with the
+  eyes fully shut, so PERCLOS was structurally incapable of reading anything but 0.000.
+- **Before / after**, over the operator's three committed 2-minute recordings
+  (`bench/replays/`, analysis in `bench/eye-scale-20260731.txt`):
+
+  | PERCLOS | focused | distracted | drowsy |
+  |---|---|---|---|
+  | before (blendshape @ 0.80) | 0.000 | 0.000 | 0.000 |
+  | after (aperture @ 0.80) | 0.000 | 0.003 | 0.118 |
+
+  Three replay ordering assertions went from skipped to passing.
+- **The threshold did not change.** 0.80 is still the literature's P80, unfitted. Only the
+  quantity it is applied to changed, which is why this is a bug fix and not a tuning.
+- **Alternative rejected:** keeping the blendshape and lowering the cutoff to ~0.55–0.65.
+  It would have worked numerically (drowsy 0.18–0.31) but the number would have been fitted
+  to one face on one phone, and the sweep showed the open and closed populations *overlap*
+  on the distracted recording — open p95 0.482 against closed p5 0.482 — so no cutoff on
+  that measure separates them there. We would also have had to stop calling it P80.
+- **Alternative rejected:** loosening to `aperture >= 0.70` to compensate for MediaPipe's
+  mesh not fully collapsing a shut eye (which makes our PERCLOS read low — 0.118 where the
+  eyes were geometrically closed 26% of the time). Rejected as fitting a number to make our
+  own output look better. We report the conservative bias instead (docs/SIGNALS.md §5.1).
+- **Negative result kept:** the same class of bug affects yawns and is *not* fixed.
+  `jawOpen` peaked at 0.612 against a 0.60 cutoff needing 1.2 s, so two real yawns detected
+  as zero. The geometric fix needs mouth landmarks, which the privacy allow-list excludes
+  by design — that requires architect sign-off, not a unilateral edit (docs/SIGNALS.md §9).
+
 ## 2026-07-28 — Phase 3: kotlinx-serialization-json for the recording format
 
 - **What/License:** org.jetbrains.kotlinx:kotlinx-serialization-json 1.6.3 (Apache-2.0),

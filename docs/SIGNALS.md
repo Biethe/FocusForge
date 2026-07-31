@@ -63,28 +63,39 @@ work** — see the protocol in §9.
 
 ## 3. Eye closure
 
-> `eyeClosure` — 0 means wide open, 1 means fully shut.
+> `eyeClosure` — 0 means open as wide as *your* normal, 1 means fully shut.
 
-**Primary formula:** the average of the detector's two eye-blink scores.
+**Primary formula:** the fraction of your eye's own opening that has been lost. First the
+*eye aspect ratio* (EAR) — how tall the eye opening is divided by how wide it is, straight
+from the six lid points of each eye:
+
+```
+EAR = (|p2 - p6| + |p3 - p5|) / (2 x |p1 - p4|)
+eyeClosure = 1 - (EAR / your open-eye EAR),  clamped to 0..1
+```
+
+All distances are converted to pixels first, because the analysis frame is 480x640 — a
+normalized vertical distance is not comparable to a horizontal one on a non-square image.
+
+Your open-eye EAR is learned during calibration (§2), median over the window, and it is
+genuinely personal: the operator's three sessions calibrated to 0.274, 0.293 and 0.298.
+Until ten samples exist the literature default `EAR_OPEN_REF = 0.28` stands, so that a
+session starting mid-blink cannot define a shut eye as "open" and then read every closure
+as zero afterwards. There is a test for that.
+
+**This is a ratio of physical aperture, which is the quantity the blink and PERCLOS
+literature is defined against.** That matters — see §5.1 for what happened when it wasn't.
+
+**Fallback**, used only when the lid points are missing: the average of the detector's two
+eye-blink scores.
 
 ```
 eyeClosure = (eyeBlinkLeft + eyeBlinkRight) / 2
 ```
 
-Averaging the two eyes means a one-eye glitch cannot fake a blink.
-
-**Fallback**, used only if blink scores are missing: the *eye aspect ratio* (EAR), computed
-straight from the six lid points of each eye — how tall the eye opening is divided by how
-wide it is.
-
-```
-EAR = (|p2 - p6| + |p3 - p5|) / (2 x |p1 - p4|)
-eyeClosure = (EAR_OPEN_REF - EAR) / (EAR_OPEN_REF - EAR_CLOSED_REF),  clamped to 0..1
-```
-
-`EAR_OPEN_REF = 0.28` and `EAR_CLOSED_REF = 0.13` are typical open- and closed-eye values.
-All distances are converted to pixels first, because the analysis frame is 480x640 — a
-normalized vertical distance is not comparable to a horizontal one on a non-square image.
+Averaging the two eyes means a one-eye glitch cannot fake a blink. Note the two sources are
+**not on the same scale** — that is the whole point of §5.1 — so a stream that switched
+between them mid-session would show a step. In practice the detector emits both or neither.
 
 If neither source is available, `eyeClosure` is **null**, not zero. That distinction runs
 all the way through: we never report "eyes open" when what we mean is "cannot see".
@@ -135,7 +146,7 @@ Two details that matter more than the threshold:
    time that was. Counting an absent face as "not closed" would quietly flatter a user who
    left the room.
 
-### 5.1 Open question: is 0.80 the right number on this device?
+### 5.1 RESOLVED — the cutoff was fine; what it was applied to was not
 
 The P80 definition comes from research that measures the *eyelid aperture* — the percentage
 of the pupil actually covered by the lid. We do not have that. We have MediaPipe's
@@ -162,15 +173,50 @@ makes it the stronger candidate as PERCLOS's input — and, being a true apertur
 one that lets us keep the P80 definition rather than bend a threshold to fit a confidence
 score.
 
-**Still unmeasured:** the *typical* value during a sustained closure. Both numbers above are
-single-frame extremes, and a cutoff picked from an extreme under-triggers just as badly as
-one picked from a paper. The `drowsy` recording in §12 is twelve 2-second closures, which
-is exactly the distribution needed; `bench/analyze_eye_scale.py` computes it from the raw
-frames. **No threshold changes until that analysis exists** (CLAUDE.md §4.1).
+#### What the three recordings said
 
-Until then PERCLOS reads 0.000 on this phone. That is a known-wrong number, kept visible
-rather than papered over, and `longClosureCount` (cutoff 0.50, which *is* reached) carries
-the drowsiness signal in the meantime.
+Full output: `bench/eye-scale-20260731.txt`, produced by `bench/analyze_eye_scale.py` from
+the committed recordings. Frames were split into open and closed populations using the
+*geometric* measure, deliberately, so that the confidence score under investigation was not
+used to define its own answer.
+
+Fraction of measurable time counted as "eyes closed", time-weighted:
+
+| definition | distracted | drowsy | focused |
+|---|---|---|---|
+| `blink >= 0.50` | 0.100 | 0.313 | 0.033 |
+| `blink >= 0.65` | 0.013 | 0.180 | 0.002 |
+| `blink >= 0.80` (what we shipped) | **0.000** | **0.000** | **0.000** |
+| `aperture >= 0.70` | 0.031 | 0.178 | 0.003 |
+| `aperture >= 0.80` (P80, what we ship now) | 0.003 | **0.118** | 0.000 |
+
+The eye-blink score's two populations *overlap* on the distracted recording — its open p95
+(0.482) and its closed p5 (0.482) are the same number. No cutoff on that measure separates
+open from closed there. The aperture measure has no such problem.
+
+#### The fix
+
+**We changed the input, not the threshold.** `PERCLOS_CLOSED_LEVEL` is still 0.80, still
+the literature's number, still unfitted to anything. What it tests is now a true aperture
+ratio (§3) rather than a model confidence. A shut eye reaches 0.90 on that scale, so P80 is
+reachable with headroom — where the old scale topped out at 0.73 and could never get there.
+
+That also means eye closure changed *everywhere*, not just in PERCLOS: blinks and the gaze
+eye-closure limit now read the same aperture fraction. Their thresholds were unchanged too.
+
+#### What we are still conservative about
+
+Our aperture is itself a proxy. MediaPipe's mesh does not fully collapse a shut eye, so the
+median frame in a held closure reads 0.78 — just under P80. PERCLOS therefore counts only
+the deepest part of each closure: 11.8% for a drowsy session in which the eyes were
+geometrically closed 26% of the time. **Our PERCLOS reads low, not high.** We prefer that
+direction, and we are not fitting a looser cutoff to close the gap, because `aperture >=
+0.70` would be a number chosen to make our own numbers look better rather than one that
+means anything.
+
+For the same reason, PERCLOS on a focused session reads exactly 0.000 here: at ~9 fps an
+ordinary 200 ms blink is one or two frames and rarely gets sampled at its deepest. PERCLOS
+on this device measures *sustained* closure, not blinking. `blinkRatePerMin` covers blinks.
 
 ---
 
@@ -263,15 +309,26 @@ The jaw counts as wide open above `YAWN_JAW_OPEN_LEVEL = 0.60` and closed again 
 
 This is the first item on the cut list in `docs/PROMPTS.md` if we fall behind.
 
+**It does not work on the A20e, and we are not fixing it yet.** The operator yawned twice
+during the `drowsy` recording as the protocol asks. `jawOpen` peaked at 0.612 and spent two
+frames — about 0.2 s — above 0.60, against a `YAWN_MIN_MS` of 1200. Detected yawns: 0.
+
+This is the same failure as §5.1 in a different signal: `jawOpen` is a confidence score, we
+threshold it as if it were a percentage, and its scale does not reach where we put the line.
+The analogous fix would be a mouth aspect ratio from the lip landmarks — but we deliberately
+keep no mouth landmarks (§0), so that fix would widen the privacy allow-list and needs
+architect sign-off, not a unilateral edit. Until then `yawnCount` reads 0 on this device and
+no claim is made for it.
+
 ---
 
 ## 10. All thresholds in one place
 
 | Constant | Value | Meaning |
 |---|---|---|
-| `EYE_CLOSE_LEVEL` | 0.50 | eye counts as closing above this |
+| `EYE_CLOSE_LEVEL` | 0.50 | eye counts as closing above this (half its opening lost) |
 | `EYE_OPEN_LEVEL` | 0.35 | eye counts as open again below this (hysteresis gap: 0.15) |
-| `EAR_OPEN_REF` / `EAR_CLOSED_REF` | 0.28 / 0.13 | open / closed eye aspect ratio, fallback path only |
+| `EAR_OPEN_REF` | 0.28 | open-eye aspect ratio, used only until calibration learns yours |
 | `BLINK_MIN_MS` | 50 | shorter closures are noise |
 | `BLINK_MAX_MS` | 500 | longer closures are long closures, not blinks |
 | `BLINK_RATE_WINDOW_MS` | 60 000 | blink rate is per minute |
@@ -447,14 +504,33 @@ Two layers, both on the `ubuntu-24.04-arm` runner (`core-tests` job):
    inputs whose answer we know exactly — hysteresis, frame-rate independence, the matrix
    layout, calibration, PERCLOS with a missing face, and so on. Plus ordering assertions
    over three *generated* streams, which prove the pipeline separates the three behaviours.
-2. **Replay tests over the operator's real recordings** in `bench/replays/`:
-   - `PERCLOS(drowsy) > PERCLOS(focused)`
-   - `gazeOnScreenFraction(focused) > gazeOnScreenFraction(distracted)`
-   - `longClosureCount(drowsy) > longClosureCount(focused)`
+2. **Replay tests over the operator's real recordings** in `bench/replays/` — committed
+   2026-07-31, three 2-minute sessions on the A20e, and **passing**:
+
+   | | focused | distracted | drowsy |
+   |---|---|---|---|
+   | face visible | 1.00 | 1.00 | 1.00 |
+   | PERCLOS | 0.000 | 0.003 | **0.118** |
+   | gaze on screen | **0.984** | 0.599 | 0.730 |
+   | blinks/min | 9.4 | 22.4 | 7.4 |
+   | long closures | 0 | 3 | **16** |
+   | head spread | 0.4° | 9.4° | 3.5° |
+   | yawns | 0 | 0 | 0 (see §9) |
+
+   - `PERCLOS(drowsy) > PERCLOS(focused)` — 0.118 > 0.000
+   - `gazeOnScreenFraction(focused) > gazeOnScreenFraction(distracted)` — 0.984 > 0.599
+   - `longClosureCount(drowsy) > longClosureCount(focused)` — 16 > 0
    - each recording is at least 60 s long and saw a face at least 50% of the time
 
-   Until the recordings are committed these report as **skipped**, with the message
-   `NOT MEASURED YET`. We do not fabricate data to make CI green (CLAUDE.md §4.1).
+   If the recordings are ever absent these report as **skipped** with the message
+   `NOT MEASURED YET` rather than passing vacuously. We do not fabricate data to make CI
+   green (CLAUDE.md §4.1).
+
+   Two things in that table were *not* asserted and are worth noticing anyway: the
+   distracted session has the highest blink rate and by far the most head movement (9.4°
+   against 0.4° focused), and the drowsy session's gaze fraction sits between the other
+   two — closed eyes read as "not on screen", which is correct but means gaze alone cannot
+   tell drowsy from distracted. Phase 4 needs more than one signal to separate them.
 
 We assert **ordering only**. No accuracy percentage appears anywhere in this project,
 because we have no ground truth to compute one against.
