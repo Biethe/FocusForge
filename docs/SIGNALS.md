@@ -869,19 +869,30 @@ is a tripwire. Every prior assertion was a *comparison between two recordings*, 
 that suppressed blinks everywhere passed all of them. This one fails if the pipeline stops
 seeing blinks at all, which is the failure that actually happened.
 
-### 16.5 Still open: why that session read so shallow
+### 16.5 RESOLVED — the calibration was fine; it was the threshold and the sampling
 
-The retune explains why blinks were **under-counted**. It does not fully explain a maximum
-`eyeClosure` of 0.219 across 64 seconds, which is shallower than the retune accounts for.
-The leading hypothesis is the **open-eye calibration**: closure is `1 - EAR/earOpen` (§3),
-so if `earOpen` is learned while the user is looking down, squinting, or still positioning
-the phone, it lands low and *every* later closure reads shallow — a max of 0.219 is what an
-`earOpen` roughly 25% below the true open eye would produce.
+The open-eye calibration hypothesis is **refuted**. Operator read 0.31 from the live panel,
+and the blink probe calibrated to 0.278 — both healthy, both in the 0.27-0.30 band the three
+labelled recordings produced. `earOpen` was not the problem.
 
-That is a hypothesis, not a finding. `earOpen` is now reported in the live panel and in
-every session export, so the next occurrence is diagnosable at a glance rather than by
-inference. **`NOT MEASURED YET`** until the operator's blink probe (§16.6) confirms or
-refutes it.
+The two observations from that session
+(`bench/sessions/session-sm-a202f-20260731-185007.json`) are separately explained:
+
+- **`blinkCount` = 0** is the threshold. Against the ground-truth probe, the old 0.50/0.35
+  pair detected **3 of 10** performed blinks (§16.7). Over a 64 s session containing perhaps
+  8-10 blinks, at a 30% detection rate and with the head moving unusually (that session
+  recorded a mean head spread of 11.8°, higher even than the distracted recording), zero is
+  an unremarkable outcome.
+- **`eyeClosure` max 0.219 over 61 rows** is the 1 Hz sampling, and this time the arithmetic
+  works out. Roughly 10 blinks x ~200 ms is about 2 s of a 64 s session, so a once-per-second
+  sample has about a 3% chance of landing inside one: **expect one or two hits, and one was
+  observed.** Earlier this section compared that figure against the focused recording's 15
+  hits in 115 rows and called the gap real — that comparison was wrong, because the focused
+  recording contains 37 closure events including much longer ones, so it is not the right
+  yardstick for a shorter session.
+
+`earOpen` is now reported in the live panel and every session export regardless, because it
+scales every closure and its absence made this take a round trip to rule out.
 
 ### 16.6 The blink probe — what the operator does
 
@@ -908,3 +919,48 @@ finds. Expected if the retune is right: about 13 events, the 10 blinks peaking n
 near 1000 ms. If the peaks come out far shallower than that, the thresholds are still wrong
 and the numbers in §16.3 will be revised from this capture rather than from the three
 labelled sessions.
+
+### 16.7 Ground truth: the blink probe
+
+`bench/replays/blinkprobe-sm-a202f-20260731-200433.json` — 30 s, 254 frames, **8.4 fps**,
+calibrated open EAR 0.278. The operator performed **10 normal blinks and 3 one-second
+closures** to the §16.6 protocol. This is the only recording in the project with a known
+answer; everything else is unlabelled behaviour.
+
+What a real blink on this device looks like:
+
+| | value |
+|---|---|
+| the 3 slow closures | peaks **0.94, 0.94, 0.91**, durations 1437 / 1712 / 1922 ms |
+| normal blink peak depth | 0.35, 0.43, 0.43, 0.49, 0.51, 0.52 |
+| normal blink duration | ~120-290 ms |
+| eyeBlink blendshape, same events | 0.37-0.51 for blinks, 0.74-0.75 for the slow closures |
+
+Run through the real engine:
+
+| thresholds | blinks detected of 10 | long closures of 3 |
+|---|---|---|
+| old, 0.50 / 0.35 shared | **3** | 3 |
+| shipped, split | **6** | 3 |
+
+Two conclusions, and the second is not flattering:
+
+1. **The retune is validated.** Deliberate normal blinks peak at 0.35-0.52 on this camera,
+   so a 0.50 entry level was above most of them. Doubling the detection rate is the
+   threshold change doing exactly what the measurement predicted. Slow closures were caught
+   3 of 3 either way — they peak above 0.9, which is why the strict pair is safe for them.
+2. **We still miss about 4 blinks in 10, and the threshold cannot fix that.** At 8.4 fps a
+   frame arrives every 119 ms and a normal blink lasts 120-290 ms, so some close and reopen
+   entirely between two frames. They are not in the recording at all: the raw trace contains
+   only 6 blink-shaped events even with the detector set as low as 0.20.
+
+**So every blink count and blink rate this project reports is a floor, not a measurement**,
+and on this device it under-reports by roughly 40%. The focused recording's 16.4 blinks/min
+is consistent with a true rate nearer 25-30. We do not apply a correction factor for this,
+because a correction estimated from one 30-second probe would be inventing data; we report
+the undercount and say so wherever the number appears.
+
+Raising the camera rate would fix it and directly contradicts Phase 6, which exists to drop
+the frame rate for battery. That trade is worth an explicit decision from the architect
+rather than a silent one: **blink rate and frame rate cannot both be optimised.** PERCLOS
+and long closures are unaffected, because they measure sustained states rather than events.

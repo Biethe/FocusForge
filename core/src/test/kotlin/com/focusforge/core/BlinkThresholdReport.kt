@@ -2,6 +2,7 @@ package com.focusforge.core
 
 import java.io.File
 import kotlin.test.Test
+import kotlin.test.assertTrue
 import org.junit.jupiter.api.Assumptions
 
 /**
@@ -31,6 +32,52 @@ class BlinkThresholdReport {
             ?.filter { it.isFile && it.name.endsWith(".json") && it.name.contains(label) }
             ?.minByOrNull { it.name }
             ?.let { ReplayJson.decode(it.readText()) }
+
+    /**
+     * The blink probe is the only recording in this project with **ground truth**: the
+     * operator performed a counted 10 normal blinks and 3 one-second closures to protocol
+     * (docs/SIGNALS.md §16.6). Everything else we have is unlabelled behaviour.
+     *
+     * The bounds are wide on purpose. At 8.4 fps a 150 ms blink is one or two frames and
+     * some fall entirely between them, so detecting all 10 is not physically possible —
+     * this asserts the pipeline is in the right range, not that it is exact.
+     */
+    @Test
+    fun `the blink probe detects roughly what the operator performed`() {
+        val probe = load("blinkprobe")
+        Assumptions.assumeTrue(
+            probe != null,
+            "NOT MEASURED YET — no blinkprobe recording in ${replayDir.absolutePath}",
+        )
+        val totals = SignalReplay.summarize(probe!!)
+        println("   blinkprobe: blinks=${totals.blinkCount} longClosures=${totals.longClosureCount} " +
+            "(operator performed 10 blinks + 3 one-second closures)")
+        assertTrue(
+            totals.blinkCount in 5..15,
+            "10 deliberate blinks were performed, ${totals.blinkCount} detected",
+        )
+        assertTrue(
+            totals.longClosureCount in 2..5,
+            "3 one-second closures were performed, ${totals.longClosureCount} detected",
+        )
+    }
+
+    @Test
+    fun `what the old thresholds would have made of the blink probe`() {
+        val probe = load("blinkprobe") ?: return
+        println("\n=== Blink probe: 10 performed blinks + 3 one-second closures")
+        println("   %-24s %8s %8s".format("close/open (shared)", "blinks", "long"))
+        for ((close, open) in listOf(0.50 to 0.35, 0.40 to 0.28, 0.30 to 0.18)) {
+            val t = SignalReplay.summarize(probe, SignalConfig(
+                eyeCloseLevel = close, eyeOpenLevel = open,
+                longClosureLevel = close, longClosureOpenLevel = open,
+            ))
+            println("   %-24s %8d %8d".format(
+                "%.2f / %.2f".format(close, open), t.blinkCount, t.longClosureCount))
+        }
+        val shipped = SignalReplay.summarize(probe)
+        println("   %-24s %8d %8d".format("shipped (split)", shipped.blinkCount, shipped.longClosureCount))
+    }
 
     @Test
     fun `sweep the close and open levels over the real recordings`() {

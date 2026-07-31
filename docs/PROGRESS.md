@@ -5,6 +5,58 @@
 > "operator confirmed: &lt;what was seen&gt;". If something is not measured yet, it says
 > `NOT MEASURED YET`.
 
+## 2026-08-01 — Phase 4.5b: the blink probe settles it (and finds a second limit)
+
+**Did**
+- You recorded the 30-second blink probe with a known answer — 10 normal blinks, 3 slow
+  one-second closures. That is the **first ground truth this project has ever had**;
+  everything else we own is unlabelled behaviour.
+- Ran it through the real engine, old thresholds against new:
+
+  | | blinks found (of 10) | slow closures found (of 3) |
+  |---|---|---|
+  | old settings | **3** | 3 |
+  | new settings | **6** | 3 |
+
+- So the retune does what the measurements said it would. Your normal blinks peak at
+  0.35-0.52 on this camera and the old cut-off was 0.50 — above most of them. Your slow
+  closures peak above 0.90, which is why they were always caught.
+- **The 0-blink mystery is fully explained, and my earlier guess was wrong.** I suspected
+  the app had mis-learned your open-eye size. It had not: you read 0.31 on screen and the
+  probe calibrated to 0.278, both healthy. The real answers were duller — the old threshold
+  finds only 3 blinks in 10, and the export's per-second column samples once a second while
+  a blink lasts a fifth of one, so it almost always looks between them. I had called that
+  sampling gap "real" by comparing against a longer recording with three times the eye
+  activity; that comparison was not valid and the doc is corrected.
+- **A second limit turned up, and it cannot be fixed by tuning.** We miss about 4 blinks in
+  10 because the camera runs at 8.4 frames per second — a blink takes 120-290 ms, a frame
+  arrives every 119 ms, so some blinks happen entirely between two frames. They are not in
+  the recording at all.
+
+**Evidence**
+- `bench/blinks-20260801.txt`, regenerated, now including the probe results.
+- Probe committed at `bench/replays/blinkprobe-sm-a202f-20260731-200433.json`; your session
+  moved to `bench/sessions/` with a README explaining why it cannot be replayed.
+- 91 `:core` tests pass, including a new one asserting the probe detects a plausible share
+  of what you actually performed — the first test in this project anchored to a known answer.
+
+**Next**
+- Nothing needed from you for this patch. Phase 5 (the on-device LLM coach) is next.
+- **One decision for the architect**, and it should be made before Phase 6 rather than
+  after: blink counts are a **floor, not a measurement** — we under-report by roughly 40% at
+  this frame rate, and Phase 6 exists to lower the frame rate further for battery life.
+  Blink rate and battery cannot both be optimised. PERCLOS, long closures and the focus
+  score are unaffected, because they measure states that last rather than events that flick.
+
+**Risks**
+- We deliberately do **not** scale blink counts up to compensate. A correction factor
+  estimated from one 30-second probe would be invented data, and it would then contaminate
+  every blink number we publish. So the numbers are honest and low.
+- One probe, one person, one lighting condition. The threshold now has ground truth behind
+  it, but only one point of it.
+
+---
+
 ## 2026-08-01 — Phase 4.5: blink detection was missing half the blinks
 
 **Did**

@@ -1,0 +1,15 @@
+# Session exports
+
+Written by the Session screen's **Export session JSON** button: scores and signals, one row
+per second, plus the device's silicon facts. Numbers only — no landmarks, no blendshapes,
+no image data (docs/SIGNALS.md §15.7).
+
+These are **not** replay fixtures. They cannot be replayed, because they carry no face
+geometry — the pipeline cannot be re-run from one. They are kept as a record of what the app
+actually reported on the phone, which is how the blink bug in §16 was first spotted.
+
+Landmark recordings, which *can* be replayed frame by frame, live in `bench/replays/`.
+
+| file | what it is |
+|---|---|
+| `session-sm-a202f-20260731-185007.json` | The 64 s session that reported 0 blinks and started the Phase 4.5 investigation. Recorded with app 0.4.0-phase4, before `earOpen` was added to the export. |

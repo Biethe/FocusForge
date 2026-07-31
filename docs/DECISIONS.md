@@ -5,6 +5,28 @@
 > Every optimization gets before/after numbers from committed benchmark files —
 > negative results are kept and reported honestly.
 
+## 2026-08-01 — Phase 4.5: blink counts are a floor, and we do not correct them
+
+- **What:** the blink probe gives ground truth — 10 performed blinks, 6 detected. The
+  missing 4 are not a threshold problem: at 8.4 fps a frame arrives every 119 ms and a
+  normal blink lasts 120-290 ms, so some open and close entirely between frames. Only 6
+  blink-shaped events exist in the raw trace even with the detector set to 0.20.
+- **Decision:** report the undercount, do not correct it. A scaling factor estimated from a
+  single 30-second probe would be manufactured data, and it would then propagate into every
+  blink number the project publishes.
+- **Consequence for the architect:** blink rate and frame rate cannot both be optimised.
+  Phase 6 exists to *drop* the frame rate for battery, which will make this worse. PERCLOS,
+  long closures and the focus score are unaffected — they measure sustained states, not
+  events. If blink rate is to be trusted as a signal, that needs deciding before Phase 6,
+  not after.
+- **Refuted:** the open-eye calibration hypothesis for the 0-blink session. Operator
+  measured 0.31 live and the probe calibrated to 0.278, both healthy. The session's zero was
+  the old threshold (which detects 3 of 10) and its shallow `eyeClosure` column was 1 Hz
+  sampling — about 2 s of blinks in 64 s gives roughly a 3% chance per sample, so the one
+  observed hit is the expected number. An earlier draft of §16.5 called that gap real by
+  comparing it against a recording with three times the closure events; that comparison was
+  wrong and is corrected in place.
+
 ## 2026-08-01 — Phase 4.5: blinks and long closures get separate thresholds
 
 - **What:** `BlinkDetector` now runs two hysteresis state machines. Blinks use
