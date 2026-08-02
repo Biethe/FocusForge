@@ -102,6 +102,29 @@ object SignalThresholds {
      */
     const val BLINK_RATE_MIN_COVERAGE_MS = 20_000L
 
+    /**
+     * Below this vision frame rate, blink *counting* is systematically incomplete and the
+     * rate is labelled `undersampled` rather than presented as a measurement.
+     *
+     * Derived, not chosen. Measured blink durations on this device: p10 58 ms, p50 132 ms,
+     * p90 282 ms (docs/SIGNALS.md §16.7). Catching an event of duration d needs a frame
+     * interval under d — two samples inside the median 132 ms blink means an interval of
+     * 66 ms, i.e. **15 fps**. Below that, blinks close and reopen between frames.
+     *
+     * The A20e runs the vision loop at 8.4-9.6 fps measured, so on the operator's phone this
+     * flag reads `undersampled` **always**, and Phase 6's duty-cycling will lower it
+     * further. That is the honest answer, not a bug: the ground-truth probe detected 6 of
+     * 10 performed blinks at 8.4 fps (§16.7). See the architect's ruling in
+     * docs/DECISIONS.md, 2026-08-02.
+     */
+    const val BLINK_FULL_RATE_MIN_FPS = 15.0
+
+    /**
+     * Rolling window for the effective vision frame rate. Five seconds is long enough to be
+     * stable and short enough to follow Phase 6 duty-cycling as it happens.
+     */
+    const val VISION_FPS_WINDOW_MS = 5_000L
+
     // ---------------------------------------------------------------- PERCLOS
 
     /**
@@ -216,6 +239,8 @@ data class SignalConfig(
     val blinkMaxMs: Long = SignalThresholds.BLINK_MAX_MS,
     val blinkRateWindowMs: Long = SignalThresholds.BLINK_RATE_WINDOW_MS,
     val blinkRateMinCoverageMs: Long = SignalThresholds.BLINK_RATE_MIN_COVERAGE_MS,
+    val blinkFullRateMinFps: Double = SignalThresholds.BLINK_FULL_RATE_MIN_FPS,
+    val visionFpsWindowMs: Long = SignalThresholds.VISION_FPS_WINDOW_MS,
     val perclosClosedLevel: Double = SignalThresholds.PERCLOS_CLOSED_LEVEL,
     val perclosWindowMs: Long = SignalThresholds.PERCLOS_WINDOW_MS,
     val maxFrameWeightMs: Long = SignalThresholds.MAX_FRAME_WEIGHT_MS,

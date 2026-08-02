@@ -70,6 +70,22 @@ object FocusThresholds {
     const val WEIGHT_STEADINESS = 0.20
 
     /**
+     * **Blink rate is deliberately weighted zero** — architect's ruling, 2026-08-02, recorded
+     * verbatim in docs/DECISIONS.md.
+     *
+     * It is semantically ambiguous (reading suppresses blinking, so a low rate means either
+     * deep focus or absence), high-variance between individuals, and unvalidatable under our
+     * ordering-assertion methodology. It is also the one signal that degrades with frame
+     * rate, and duty-cycling the vision loop is a judged deliverable for Phase 6.
+     *
+     * The constant exists so the ruling is visible where the weights are, rather than only
+     * in a document. No blink term is computed: multiplying by zero would be dead
+     * arithmetic pretending to be a design. Blink rate remains measured, displayed and
+     * exported — flagged `undersampled` when the frame rate cannot support it.
+     */
+    const val WEIGHT_BLINK_RATE = 0.0
+
+    /**
      * Exponential smoothing time constant for the displayed score: after this long, about
      * 63% of a step change has been absorbed. Eight seconds keeps the number from twitching
      * without hiding a real drop — and the inputs are themselves 60 s rolling windows, so

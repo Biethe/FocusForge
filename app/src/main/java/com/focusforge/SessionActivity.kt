@@ -19,6 +19,7 @@ import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.camera.view.PreviewView
 import androidx.core.content.ContextCompat
+import com.focusforge.core.BlinkRateValidity
 import com.focusforge.core.FaceSample
 import com.focusforge.core.FocusScorer
 import com.focusforge.core.FocusState
@@ -267,8 +268,17 @@ class SessionActivity : ComponentActivity() {
             appendLine("on screen %.0f%%   face seen %.0f%%   PERCLOS %.3f".format(
                 Locale.US, summary.signals.gazeOnScreenFraction * 100,
                 summary.signals.faceVisibleFraction * 100, summary.signals.perclos))
-            append("blinks %d (%.1f/min)   long closures %d   head %.1f deg".format(
-                Locale.US, summary.signals.blinkCount, summary.signals.blinkRatePerMin,
+            // The evidence rule, in the UI: an undersampled blink rate is a floor, not a
+            // measurement, so it is not shown as a number (docs/DECISIONS.md 2026-08-02).
+            val blinks = if (summary.signals.blinkRateValidity == BlinkRateValidity.FULL_RATE) {
+                "blinks %d (%.1f/min)".format(
+                    Locale.US, summary.signals.blinkCount, summary.signals.blinkRatePerMin)
+            } else {
+                "blinks %d+ (rate undersampled at %.1f fps)".format(
+                    Locale.US, summary.signals.blinkCount, summary.signals.meanVisionFps)
+            }
+            append("%s   long closures %d   head %.1f deg".format(
+                Locale.US, blinks,
                 summary.signals.longClosureCount, summary.signals.meanHeadStabilityDeg))
         }
     }

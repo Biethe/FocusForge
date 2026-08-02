@@ -121,8 +121,12 @@ What the closure was then depends on how long it lasted:
 20 seconds of data (`BLINK_RATE_MIN_COVERAGE_MS`) it reports *nothing* rather than
 extrapolating a rate from three seconds of camera. Typical adult rate is 12–20 per minute;
 both unusually low (locked-in concentration) and unusually high (strain) are meaningful,
-so the rate is reported as a number rather than a good/bad verdict. It is deliberately
-*not* an input to the focus score — see §15.8.
+so the rate is reported as a number rather than a good/bad verdict.
+
+**Blink rate is display and telemetry only — its fusion weight is zero** (architect's ruling
+of 2026-08-02, in `docs/DECISIONS.md`; see §15.8 and §16.8). It is also the one signal that
+degrades with frame rate, so every report of it carries a `full-rate` / `undersampled`
+label (§16.8).
 
 If the face disappears mid-closure, the closure is abandoned rather than measured — we
 have no idea how long the eyes stayed shut while we could not see them.
@@ -758,10 +762,19 @@ The timeline is thinned to one row per second (the pipeline produces about nine)
 
 ### 15.8 What is deliberately not in the score
 
-- **Blink rate**, even though §14.3 found it was the one signal that isolated the distracted
-  session. It did so by 13/min against 12/min — a **one-blink margin** on a single
-  recording. A term that fragile would add noise dressed up as information. It is measured,
-  displayed and exported; it just does not move the score.
+- **Blink rate**, at weight exactly zero (`FocusThresholds.WEIGHT_BLINK_RATE = 0.0`).
+  Originally excluded here because §14.3 found its separation was a **one-blink margin**
+  (13/min against 12/min) on a single recording. The architect's ruling of 2026-08-02 then
+  made the demotion formal and added three further reasons: blink rate is semantically
+  ambiguous (reading suppresses blinking, so a low rate means either deep focus or an empty
+  chair), it varies widely between individuals, and it cannot be validated under an
+  ordering-assertion methodology. It is also the only signal that degrades as the frame rate
+  drops, and duty-cycling the vision loop is a judged Phase 6 deliverable. The remaining four
+  inputs — PERCLOS, long closures, gaze-on-screen, head stability — all measure states that
+  persist across many frames and so survive duty-cycling.
+
+  It is still measured, displayed and exported. It simply does not move the score, and there
+  is a test asserting the score is identical across a tenfold change in it.
 - **Yawns**, because yawn detection does not work on this device at all (§9). A term that is
   structurally zero would be dead weight, and worse, would look like evidence of calm.
 - **`faceVisible` as its own term.** Walking away already drives `gazeOnScreenFraction`
@@ -964,3 +977,37 @@ Raising the camera rate would fix it and directly contradicts Phase 6, which exi
 the frame rate for battery. That trade is worth an explicit decision from the architect
 rather than a silent one: **blink rate and frame rate cannot both be optimised.** PERCLOS
 and long closures are unaffected, because they measure sustained states rather than events.
+
+### 16.8 Frame rate is now reported with every blink number
+
+Blinks are **events**; PERCLOS, gaze and head stability are **states**. A state that lasts
+seconds survives any sane frame rate. A 130 ms event does not: at 9 fps it can begin and end
+between two frames, which is why the ground-truth probe detected 6 of 10 performed blinks
+(§16.7).
+
+The evidence rule forbids presenting an undercount as a measurement, so every blink figure
+now travels with the frame rate behind it:
+
+| field | where | meaning |
+|---|---|---|
+| `visionFps` | every export row | Frames the engine actually saw during **that row's own window**, over the elapsed time. Counted, not sampled from an average. |
+| `blinkRateValidity` | every export row | `full-rate` or `undersampled`. |
+| `meanVisionFps` | session totals | Mean across the session. |
+| `blinkRateValidity` | session totals | `undersampled` if the run **ever** dropped below the line — one duty-cycled stretch makes the whole count a floor. |
+
+**The line is 15 fps**, derived rather than picked: measured blink durations are p50 132 ms
+(§16.7), and getting two samples inside the median blink needs a frame interval of 66 ms.
+
+**On the A20e this reads `undersampled` permanently.** The vision loop measures 8.4–9.6 fps
+and Phase 6 will lower it further on purpose. That is the honest label doing its job, not a
+defect waiting to be tuned away. Both screens print
+
+```
+blinks 33+ (rate undersampled at 8.9 fps)
+```
+
+rather than a per-minute figure, and the `+` is not decoration — the count is a floor.
+
+None of this touches the focus score or the fatigue flag, which never read blink rate
+(§15.8). PERCLOS and long closures are unaffected by frame rate in the same way, because
+they are time-weighted measures of states rather than counts of events (§8).

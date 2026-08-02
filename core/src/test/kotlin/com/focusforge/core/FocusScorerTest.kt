@@ -326,3 +326,162 @@ class SessionJsonTest {
         }
     }
 }
+
+/**
+ * The architect's ruling of 2026-08-02, as tests: blink rate is display and telemetry only,
+ * and an undersampled rate is never presented as a measurement.
+ */
+class BlinkRateDemotionTest {
+
+    private fun sample(t: Long, closure: Double = 0.02) =
+        Synthetic.sample(t, closure = closure)
+
+    /** A snapshot with everything the fusion reads held fixed, and the blink figures free. */
+    private fun snapshot(t: Long, blinkRate: Double, blinks: Int) = SignalSnapshot(
+        timestampMs = t, elapsedMs = t, calibrated = true, faceVisible = true,
+        eyeClosure = 0.0, eyesClosedNow = false,
+        blinkCount = blinks, blinkRatePerMin = blinkRate, lastBlinkDurationMs = 150L,
+        longClosureCount = 0,
+        perclos = 0.0, perclosCoverageMs = 60_000L,
+        gazeOnScreen = true, gazeOnScreenFraction = 1.0,
+        headYawDevDeg = 0.0, headPitchDevDeg = 0.0, headRollDeg = 0.0, irisHorizontalDev = 0.0,
+        headStabilityDeg = 0.0, headStable = true, yawnCount = 0,
+    )
+
+    @Test
+    fun `blink rate has no influence whatsoever on the focus score`() {
+        // Everything the fusion is allowed to read is held identical; only the blink figures
+        // differ, by a factor of ten. If blink rate carried any weight at all, the two
+        // would diverge. (This deliberately does NOT run two synthetic faces through the
+        // whole pipeline: blinking legitimately moves PERCLOS and gaze, and the ruling is
+        // about the *fusion not reading blink rate*, not about blinking being invisible.)
+        fun run(blinkRate: Double): SessionSummary {
+            val scorer = FocusScorer()
+            var t = 0L
+            var blinks = 0
+            while (t <= 120_000L) {
+                blinks = (blinkRate * t / 60_000.0).toInt()
+                scorer.update(snapshot(t, blinkRate, blinks))
+                t += 100L
+            }
+            return scorer.summary(
+                CumulativeSignals(
+                    durationMs = t, samples = 1, faceVisibleFraction = 1.0, perclos = 0.0,
+                    gazeOnScreenFraction = 1.0, blinkCount = blinks, blinkRatePerMin = blinkRate,
+                    longClosureCount = 0, yawnCount = 0, meanHeadStabilityDeg = 0.0,
+                ),
+            )
+        }
+        val rare = run(3.0)
+        val frequent = run(30.0)
+        assertEquals(
+            rare.meanScore, frequent.meanScore, 1e-9,
+            "blink rate is weighted ${FocusThresholds.WEIGHT_BLINK_RATE} and must not move the score",
+        )
+        assertEquals(rare.minScore, frequent.minScore)
+        assertEquals(rare.maxScore, frequent.maxScore)
+    }
+
+    @Test
+    fun `a normal blink rate does not by itself depress the score`() {
+        // The indirect route the ruling leaves open: blinks are brief eye closures, so they
+        // touch PERCLOS and gaze. Through the real pipeline at a human 15 blinks/min that
+        // must not cost much, or "blinks a lot" would quietly read as "drowsy".
+        //
+        // The blink is shaped as a triangular dip rather than a square pulse, because that
+        // is what the lid actually does: a 200 ms blink spends only its middle ~40 ms past
+        // the 80% mark. Squaring it off puts five times as much time over the PERCLOS line
+        // as a real blink does, and the operator's focused recording — 33 real blinks —
+        // measured PERCLOS 0.000.
+        val engine = SignalEngine()
+        val scorer = FocusScorer()
+        var t = 0L
+        var last = 0
+        while (t <= 120_000L) {
+            val phase = t % 4_000L
+            val closure = if (phase < 200L && t > 0L) {
+                val p = phase / 200.0            // 0..1 across the blink
+                (1.0 - abs(2.0 * p - 1.0)).coerceIn(0.02, 1.0)
+            } else 0.02
+            last = scorer.update(engine.update(sample(t, closure))).score
+            t += 20L
+        }
+        assertTrue(last >= 95, "a normally blinking, focused session scored $last")
+        assertTrue(
+            engine.cumulative().perclos < 0.03,
+            "ordinary blinking should barely register in PERCLOS, got ${engine.cumulative().perclos}",
+        )
+    }
+
+    @Test
+    fun `the fusion weights still sum to one without a blink term`() {
+        assertEquals(
+            1.0,
+            FocusThresholds.WEIGHT_ATTENTION + FocusThresholds.WEIGHT_ALERTNESS +
+                FocusThresholds.WEIGHT_STEADINESS + FocusThresholds.WEIGHT_BLINK_RATE,
+            1e-9,
+        )
+        assertEquals(0.0, FocusThresholds.WEIGHT_BLINK_RATE, 1e-12)
+    }
+
+    @Test
+    fun `a slow vision loop marks the blink rate undersampled`() {
+        val engine = SignalEngine()
+        var last: SignalSnapshot? = null
+        var t = 0L
+        while (t <= 30_000L) { last = engine.update(sample(t)); t += 120L } // ~8.3 fps
+        assertEquals(BlinkRateValidity.UNDERSAMPLED, last!!.blinkRateValidity)
+        assertTrue(last.visionFps in 7.0..10.0, "got ${last.visionFps} fps")
+        assertEquals(BlinkRateValidity.UNDERSAMPLED, engine.cumulative().blinkRateValidity)
+    }
+
+    @Test
+    fun `a fast vision loop marks it full-rate`() {
+        val engine = SignalEngine()
+        var last: SignalSnapshot? = null
+        var t = 0L
+        while (t <= 30_000L) { last = engine.update(sample(t)); t += 33L } // ~30 fps
+        assertEquals(BlinkRateValidity.FULL_RATE, last!!.blinkRateValidity)
+        assertTrue(last.visionFps in 25.0..35.0, "got ${last.visionFps} fps")
+        assertEquals(BlinkRateValidity.FULL_RATE, engine.cumulative().blinkRateValidity)
+    }
+
+    @Test
+    fun `one slow stretch makes the whole run undersampled`() {
+        // Phase 6 duty-cycles the camera down and back up. A run that spent any time below
+        // the line has an incomplete blink count for the whole run, and says so.
+        val engine = SignalEngine()
+        var t = 0L
+        while (t <= 20_000L) { engine.update(sample(t)); t += 33L }   // fast
+        while (t <= 40_000L) { engine.update(sample(t)); t += 200L }  // duty-cycled to 5 fps
+        while (t <= 60_000L) { engine.update(sample(t)); t += 33L }   // fast again
+        assertEquals(BlinkRateValidity.UNDERSAMPLED, engine.cumulative().blinkRateValidity)
+    }
+
+    @Test
+    fun `the export carries the frame rate and the validity flag on every row`() {
+        val engine = SignalEngine()
+        val scorer = FocusScorer()
+        val builder = SessionBuilder("test", 0L)
+        var t = 0L
+        while (t <= 30_000L) {
+            val snapshot = engine.update(sample(t))
+            builder.add(snapshot, scorer.update(snapshot))
+            t += 120L // ~8.3 fps
+        }
+        val recording = builder.build(scorer.summary(engine.cumulative()))
+        val rows = recording.samples.drop(1) // the first row spans no window
+        assertTrue(rows.isNotEmpty())
+        for (row in rows) {
+            assertTrue(row.visionFps in 6.0..11.0, "row at ${row.t} ms reports ${row.visionFps} fps")
+            assertEquals("undersampled", row.blinkRateValidity)
+        }
+        assertEquals("undersampled", recording.summary.blinkRateValidity)
+        assertTrue(recording.summary.meanVisionFps in 7.0..10.0)
+
+        // ...and it survives the round trip, because the architect reads the file.
+        val restored = SessionJson.decode(SessionJson.encode(recording))
+        assertEquals(recording.samples, restored.samples)
+        assertEquals(recording.summary, restored.summary)
+    }
+}

@@ -5,6 +5,57 @@
 > "operator confirmed: &lt;what was seen&gt;". If something is not measured yet, it says
 > `NOT MEASURED YET`.
 
+## 2026-08-02 — Architect's ruling applied: blink rate demoted, frame rate on every number
+
+**Did**
+- The architect ruled on the blink-versus-battery trade I raised. **Blink rate is now
+  officially display-only — it counts for zero in the focus score.** The score and the
+  fatigue warning rest on the four signals that do not care how fast the camera runs:
+  eye-closure time (PERCLOS), long closures, looking at your work, and head steadiness. The
+  ruling is copied word for word into `docs/DECISIONS.md`.
+- Put the ruling into the code where it can be seen: the weight sits alongside the other
+  three, written as zero with the reasoning next to it, and a test proves the score does not
+  budge when the blink rate changes tenfold.
+- **Every blink number now carries the camera speed behind it.** Exports gained two fields
+  per row — the frames per second actually achieved during that second, and a label saying
+  whether the blink rate is a real measurement (`full-rate`) or a floor (`undersampled`).
+  The session totals carry the same, and are marked undersampled if the camera dipped at any
+  point during the session.
+- Both screens now say `blinks 33+ (rate undersampled at 8.9 fps)` instead of quoting a rate
+  we know is too low. The `+` is doing real work there.
+- The cut-off for "fast enough" is **15 frames per second**, worked out rather than picked:
+  your blinks last about 132 ms, and you need two camera frames inside one to catch it.
+  **Your phone runs at 8.4–9.6, so this will always say `undersampled`** — and Phase 6 will
+  slow it further on purpose. That is the label working, not a fault.
+- Recorded the architect's optional idea (bursting to full speed for 3 seconds when the eyes
+  start to close) as **deferred** — not before Phase 6B, and only if we are ahead.
+
+**Evidence**
+- 98 `:core` tests pass (up from 91). New ones cover: the score is bit-identical across a
+  tenfold blink-rate change; the four weights still sum to 1; a slow loop is labelled
+  undersampled and a fast one is not; a single slow stretch marks the whole session; and the
+  new fields survive the round trip through the file.
+- One test worth mentioning because it nearly hid a real question: a *normally blinking*
+  session must still score 95 or better. Blinks do reach the score indirectly, because a
+  blink is a brief eye closure and PERCLOS measures eye closure. Measured on your real
+  focused recording — 33 blinks, PERCLOS 0.000 — it costs nothing.
+- Everything from Phase 4.5 still passes unchanged: the ground-truth probe, the three replay
+  orderings, the 3-30/min tripwire.
+
+**Next**
+- Phase 5: the on-device LLM coach.
+- Nothing needed from you, though the next session export you make will contain the new
+  frame-rate fields if you want to send one to the architect.
+
+**Risks**
+- The 15 fps line is derived from **your** blink durations on **your** phone. It is a
+  reasonable rule of thumb, not a universal constant.
+- Blink rate now appears in the app looking distinctly second-class. That is deliberate and
+  correct, but if the architect later wants it back in the score, the frame-rate problem
+  comes back with it.
+
+---
+
 ## 2026-08-01 — Phase 4.5b: the blink probe settles it (and finds a second limit)
 
 **Did**

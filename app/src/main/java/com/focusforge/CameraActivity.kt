@@ -405,7 +405,12 @@ class CameraActivity : ComponentActivity() {
                     ?: "n/a"))
             appendLine("blinks    %-4d  rate %s  long closures %d".format(
                 Locale.US, s.blinkCount,
-                s.blinkRatePerMin?.let { "%.1f/min".format(Locale.US, it) } ?: "not enough data",
+                when {
+                    s.blinkRateValidity != com.focusforge.core.BlinkRateValidity.FULL_RATE ->
+                        "undersampled (%.1f fps)".format(Locale.US, s.visionFps)
+                    else -> s.blinkRatePerMin?.let { "%.1f/min".format(Locale.US, it) }
+                        ?: "not enough data"
+                },
                 s.longClosureCount))
             appendLine("PERCLOS   %.3f  over %.0f s of measurable time".format(
                 Locale.US, s.perclos, s.perclosCoverageMs / 1000.0))

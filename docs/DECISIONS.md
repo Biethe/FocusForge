@@ -5,6 +5,66 @@
 > Every optimization gets before/after numbers from committed benchmark files —
 > negative results are kept and reported honestly.
 
+## 2026-08-02 — ARCHITECT RULING: blink rate demoted, frame rate annotated
+
+Recorded verbatim, as issued:
+
+> 1. Blink rate is DEMOTED to display/telemetry only: fusion weight = 0. The fusion and
+>    fatigue flag rest on PERCLOS, long closures, gaze-on-screen, and head stability —
+>    all fps-robust at the Phase 6 duty-cycled rate.
+> 2. Rationale for the record: blink rate is semantically ambiguous (reading suppresses
+>    blinks), high-variance across individuals, and unvalidatable with our ordering-
+>    assertion methodology; duty-cycling is a core judged deliverable.
+> 3. Evidence-rule consequence: session exports must now include effective visionFps per
+>    sample window and a blinkRateValidity field ("full-rate" | "undersampled"). When
+>    undersampled, the UI shows blink rate greyed or hidden; exports keep the raw count
+>    but flagged. We never present an undercount as a measurement.
+> 4. Phase 4.5 remains mandatory: blink detection must be verified correct at full frame
+>    rate (calibration protocol + replay assertions unchanged).
+> 5. Update docs/SIGNALS.md to reflect the demotion and the fps annotation.
+> 6. OPTIONAL stretch, only if we're ahead after Phase 6B: event-driven burst sampling —
+>    at low fps, when eye closure crosses the enter-threshold, burst to full fps for 3 s
+>    to time the closure precisely, then decay back. Improves long-closure edge precision
+>    and is a nice "attention-aware sensing" flourish for the submission. Do not build it
+>    now; add it to DECISIONS.md as deferred.
+
+### As implemented (2026-08-02)
+
+- **(1)** `FocusThresholds.WEIGHT_BLINK_RATE = 0.0`, carrying the ruling in the same place as
+  the other weights. No blink term is computed — multiplying by zero would be dead
+  arithmetic dressed as a design. Two tests: the score is bit-identical across a 10x
+  difference in blink rate with every other input held fixed, and the four weights still
+  sum to 1.
+- **(3)** `visionFps` is on every export row, measured **per sample window** as the ruling
+  specifies — frames the engine saw since the previous row over the elapsed time, not a
+  rolling average. `blinkRateValidity` is `full-rate` or `undersampled` on each row and on
+  the session totals, where it is `undersampled` if the run *ever* dropped below the line,
+  since one duty-cycled stretch makes the whole count a floor. Both screens now print
+  `blinks 33+ (rate undersampled at 8.9 fps)` instead of a rate.
+- **Threshold for `full-rate`: 15 fps**, derived rather than chosen — measured blink
+  durations are p50 132 ms, and two samples inside the median blink needs a 66 ms interval.
+  **The A20e measures 8.4-9.6 fps, so this flag will read `undersampled` permanently on the
+  operator's phone**, and more so after Phase 6. That is the intended outcome of the
+  evidence rule, not a defect to tune away.
+- **(4)** Unchanged and still passing: the ground-truth probe assertions, the replay ordering
+  assertions, and the 3-30/min sanity tripwire.
+- **Not hidden by this:** blinking still reaches the score indirectly through PERCLOS, since
+  a blink *is* a brief eye closure. Measured, that costs nothing — the operator's focused
+  recording has 33 blinks and PERCLOS 0.000 — and there is now a test that a normally
+  blinking session still scores >= 95.
+
+## 2026-08-02 — DEFERRED: event-driven burst sampling (architect, item 6)
+
+- **What:** at a duty-cycled low frame rate, when eye closure crosses the enter threshold,
+  burst the camera to full rate for ~3 s to time the closure precisely, then decay back.
+- **Why deferred, not rejected:** it would sharpen long-closure edge timing and is a genuine
+  "attention-aware sensing" story for the submission. **Do not build before Phase 6B**, and
+  only if we are ahead of schedule.
+- **What it would and would not fix:** it improves the *timing* of closures we have already
+  detected. It does **not** recover missed blinks — the trigger only fires once a closure is
+  already visible, and the blinks we lose are the ones that never appear in a frame at all.
+  So it does not reopen the demotion in item 1.
+
 ## 2026-08-01 — Phase 4.5: blink counts are a floor, and we do not correct them
 
 - **What:** the blink probe gives ground truth — 10 performed blinks, 6 detected. The

@@ -1,6 +1,28 @@
 package com.focusforge.core
 
 import kotlin.math.abs
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
+
+/**
+ * Whether the vision loop was fast enough for the blink *count* to mean anything.
+ *
+ * Blinks are events, not states: a 130 ms blink can open and close entirely between two
+ * frames at 9 fps, so the count is a floor rather than a measurement (docs/SIGNALS.md
+ * §16.7). PERCLOS, long closures, gaze and head stability are unaffected — they measure
+ * states that persist across many frames, which is why the focus score rests on those.
+ *
+ * The evidence rule forbids presenting an undercount as a measurement, so this travels with
+ * every export and greys the number out in the UI.
+ */
+@Serializable
+enum class BlinkRateValidity {
+    @SerialName("full-rate") FULL_RATE,
+    @SerialName("undersampled") UNDERSAMPLED,
+    ;
+
+    val wire: String get() = if (this == FULL_RATE) "full-rate" else "undersampled"
+}
 
 /** Everything the pipeline knows at one instant. Phase 4 fuses these into a focus score. */
 data class SignalSnapshot(
@@ -48,6 +70,14 @@ data class SignalSnapshot(
      * Having it in the export makes that failure visible instead of mysterious.
      */
     val earOpen: Double = 0.0,
+
+    /** Effective vision frame rate over the last few seconds. 0 until two frames exist. */
+    val visionFps: Double = 0.0,
+    /**
+     * Whether [blinkRatePerMin] is a measurement or a floor. Never present an
+     * `UNDERSAMPLED` rate as a number without saying so (docs/DECISIONS.md 2026-08-02).
+     */
+    val blinkRateValidity: BlinkRateValidity = BlinkRateValidity.UNDERSAMPLED,
 )
 
 /** Whole-run totals, used by the replay summaries rather than the rolling snapshots. */
@@ -63,6 +93,10 @@ data class CumulativeSignals(
     val longClosureCount: Int,
     val yawnCount: Int,
     val meanHeadStabilityDeg: Double,
+    /** Mean effective vision frame rate over the whole run. */
+    val meanVisionFps: Double = 0.0,
+    /** `UNDERSAMPLED` if the run ever ran too slow to count blinks properly. */
+    val blinkRateValidity: BlinkRateValidity = BlinkRateValidity.UNDERSAMPLED,
 )
 
 /**
@@ -88,12 +122,28 @@ class SignalEngine(private val config: SignalConfig = SignalConfig()) {
     private var stabilitySum = 0.0
     private var stabilitySamples = 0
 
+    /** Frame arrival times, for the effective vision frame rate. */
+    private val frameTimesMs = ArrayDeque<Long>()
+    private var fpsSum = 0.0
+    private var fpsSamples = 0
+    private var everUndersampled = false
+
     fun update(sample: FaceSample): SignalSnapshot {
         val t = sample.timestampMs
         val start = firstTimestampMs ?: t.also { firstTimestampMs = it }
         val elapsed = t - start
         lastTimestampMs = t
         samples++
+
+        val fps = updateVisionFps(t)
+        val validity = if (fps >= config.blinkFullRateMinFps) {
+            BlinkRateValidity.FULL_RATE
+        } else {
+            BlinkRateValidity.UNDERSAMPLED
+        }
+        // A run is only "full-rate" if it never dropped below the line — one duty-cycled
+        // stretch is enough to make the whole run's blink count a floor.
+        if (validity == BlinkRateValidity.UNDERSAMPLED && fpsSamples > 0) everUndersampled = true
 
         val orientation = HeadPose.fromMatrix(sample.matrix)
         val irisH = if (sample.faceVisible) {
@@ -166,6 +216,8 @@ class SignalEngine(private val config: SignalConfig = SignalConfig()) {
             headStable = spread <= config.headStableMaxDeg,
             yawnCount = yawn.yawnCount,
             earOpen = baseline.earOpen,
+            visionFps = fps,
+            blinkRateValidity = validity,
         )
     }
 
@@ -182,6 +234,12 @@ class SignalEngine(private val config: SignalConfig = SignalConfig()) {
             longClosureCount = blink.longClosureCount,
             yawnCount = yawn.yawnCount,
             meanHeadStabilityDeg = if (stabilitySamples == 0) 0.0 else stabilitySum / stabilitySamples,
+            meanVisionFps = if (fpsSamples == 0) 0.0 else fpsSum / fpsSamples,
+            blinkRateValidity = if (everUndersampled || fpsSamples == 0) {
+                BlinkRateValidity.UNDERSAMPLED
+            } else {
+                BlinkRateValidity.FULL_RATE
+            },
         )
     }
 
@@ -193,6 +251,31 @@ class SignalEngine(private val config: SignalConfig = SignalConfig()) {
         samples = 0
         stabilitySum = 0.0
         stabilitySamples = 0
+        frameTimesMs.clear()
+        fpsSum = 0.0
+        fpsSamples = 0
+        everUndersampled = false
+    }
+
+    /**
+     * Effective vision frame rate over a rolling window — what the loop is *actually*
+     * delivering, not what the camera was asked for. Phase 6 duty-cycles this deliberately,
+     * so it has to be measured rather than assumed.
+     */
+    private fun updateVisionFps(timestampMs: Long): Double {
+        frameTimesMs.addLast(timestampMs)
+        while (frameTimesMs.size > 2 &&
+            timestampMs - frameTimesMs.first() > config.visionFpsWindowMs
+        ) {
+            frameTimesMs.removeFirst()
+        }
+        if (frameTimesMs.size < 2) return 0.0
+        val spanMs = frameTimesMs.last() - frameTimesMs.first()
+        if (spanMs <= 0L) return 0.0
+        val fps = (frameTimesMs.size - 1) * 1000.0 / spanMs
+        fpsSum += fps
+        fpsSamples++
+        return fps
     }
 
     /**

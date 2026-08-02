@@ -63,6 +63,18 @@ data class SessionSample(
     val yawnCount: Int,
     /** The calibrated open-eye reference these closures are measured against (§3). */
     val earOpen: Double = 0.0,
+    /**
+     * Effective vision frame rate **over this sample's own window** — frames the engine
+     * actually saw since the previous exported row, divided by the elapsed time. Not the
+     * requested camera rate, and not a rolling average: the literal rate behind this row.
+     */
+    val visionFps: Double = 0.0,
+    /**
+     * `full-rate` or `undersampled`. When undersampled, [blinkRatePerMin] and [blinkCount]
+     * are a floor rather than a measurement and must not be presented as one
+     * (docs/DECISIONS.md 2026-08-02, docs/SIGNALS.md §16.7).
+     */
+    val blinkRateValidity: String = BlinkRateValidity.UNDERSAMPLED.wire,
 )
 
 /** Whole-session totals, flattened for the export. */
@@ -80,6 +92,13 @@ data class SessionTotals(
     val longClosureCount: Int = 0,
     val yawnCount: Int = 0,
     val meanHeadStabilityDeg: Double = 0.0,
+    /** Mean effective vision frame rate across the session. */
+    val meanVisionFps: Double = 0.0,
+    /**
+     * `undersampled` if the session *ever* ran below the rate at which blinks can be
+     * counted. Whole-session blink figures inherit that caveat.
+     */
+    val blinkRateValidity: String = BlinkRateValidity.UNDERSAMPLED.wire,
 )
 
 /** Reads and writes [SessionRecording]s. The only place the session format is defined. */
@@ -113,17 +132,31 @@ class SessionBuilder(
     private val startedAtEpochMs: Long,
     private val device: Map<String, String> = emptyMap(),
     private val intervalMs: Long = DEFAULT_INTERVAL_MS,
+    private val fullRateMinFps: Double = SignalThresholds.BLINK_FULL_RATE_MIN_FPS,
 ) {
     private val samples = ArrayList<SessionSample>()
     private var firstTimestampMs: Long? = null
     private var lastKeptMs: Long? = null
+    /** Frames seen since the last exported row, for that row's own effective frame rate. */
+    private var framesSinceKept = 0
 
     val sampleCount: Int get() = samples.size
 
     fun add(snapshot: SignalSnapshot, state: FocusState) {
         val start = firstTimestampMs ?: snapshot.timestampMs.also { firstTimestampMs = it }
+        framesSinceKept++
         val kept = lastKeptMs
         if (kept != null && snapshot.timestampMs - kept < intervalMs) return
+        // The literal frame rate behind this row: how many frames the engine saw since the
+        // previous row, over how long that took. The architect's ruling asks for the rate
+        // per sample window, so it is counted rather than sampled from a rolling average.
+        val windowMs = if (kept == null) 0L else snapshot.timestampMs - kept
+        val windowFps = if (kept == null || windowMs <= 0L) {
+            snapshot.visionFps
+        } else {
+            framesSinceKept * 1000.0 / windowMs
+        }
+        framesSinceKept = 0
         lastKeptMs = snapshot.timestampMs
         samples += SessionSample(
             t = snapshot.timestampMs - start,
@@ -148,6 +181,8 @@ class SessionBuilder(
             headPitchDevDeg = snapshot.headPitchDevDeg?.let { round3(it) },
             yawnCount = snapshot.yawnCount,
             earOpen = round3(snapshot.earOpen),
+            visionFps = round3(windowFps),
+            blinkRateValidity = validity(windowFps).wire,
         )
     }
 
@@ -169,9 +204,14 @@ class SessionBuilder(
             longClosureCount = summary.signals.longClosureCount,
             yawnCount = summary.signals.yawnCount,
             meanHeadStabilityDeg = round3(summary.signals.meanHeadStabilityDeg),
+            meanVisionFps = round3(summary.signals.meanVisionFps),
+            blinkRateValidity = summary.signals.blinkRateValidity.wire,
         ),
         samples = samples.toList(),
     )
+
+    private fun validity(fps: Double): BlinkRateValidity =
+        if (fps >= fullRateMinFps) BlinkRateValidity.FULL_RATE else BlinkRateValidity.UNDERSAMPLED
 
     private fun round3(v: Double): Double {
         if (!v.isFinite()) return 0.0
