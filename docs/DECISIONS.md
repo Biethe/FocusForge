@@ -5,6 +5,53 @@
 > Every optimization gets before/after numbers from committed benchmark files —
 > negative results are kept and reported honestly.
 
+## 2026-08-02 — STRATEGIC PIVOT: Phase 6 becomes a self-tuning runtime (":governor" / "aarchmage")
+
+Architect decision after the judge webinar. Recorded verbatim, as issued:
+
+> STRATEGIC PIVOT (architect decision after judge webinar — record in DECISIONS.md):
+> Phase 6 is redefined. We no longer ship hand-tuned optimizations; we ship a self-tuning
+> runtime. New module :governor (library-grade, reusable, its own README — public name
+> "aarchmage"):
+> 1. First-launch self-benchmark (~60 s, one-time, with progress UI): per-cluster short
+>    LLM throughput probe (little cluster / big cluster / mixed, using the loaded GGUF),
+>    memory-pressure check against RSS budget, brief thermal-sustain probe. No synthetic
+>    numbers: every figure measured on this device at this moment.
+> 2. Derive and persist device.profile.json (the "silicon lockfile"): chosen threads,
+>    affinity mask, quant/model choice from available files, vision fps budget, plus the
+>    raw benchmark evidence embedded. Exportable via share sheet.
+> 3. Performance contract in a checked-in contract.json (TTFT ≤3000 ms, drain ≤X%/hr,
+>    effective fps ≥5). Session governor v1: monitor TTFT/tok/s/thermal/battery each
+>    window; on contract violation, adjust ONE knob per decision with hysteresis
+>    (fps budget → n_ctx → thread placement), and log every decision with its trigger
+>    into the session JSON (auditable, evidence rule applies to the governor itself).
+> 4. CI: run the same self-benchmark path on ubuntu-24.04-arm and commit its derived
+>    profile next to the A20e's — the cross-silicon exhibit.
+> 5. Plan first (Plan Mode), estimate each item in days, flag anything that threatens
+>    the Aug 12 target, and propose what to simplify. Wait for operator GO.
+
+And the Phase 5 amendments issued with it:
+
+> Phase 5 amendments (architect):
+> 1. HIGHEST RISK ITEM: compile all native code -march=armv8-a baseline per CLAUDE.md.
+>    Before any UI work, build a minimal JNI smoke test that loads the GGUF and generates
+>    20 tokens on-device; operator confirms it on the phone FIRST. Only then build the
+>    coach UI around it. If you hit SIGILL, the compile flags are the suspect, not the model.
+> 2. Memory: load with mmap, n_ctx 512, report RSS immediately after model load and after
+>    first generation. If RSS exceeds 700 MB, stop and report before proceeding.
+> 3. DECISION GATE (architect-set): if tokens are not generating on-device by end of
+>    Aug 4, we switch runtime to the fallback in docs/RESOURCES.md rather than debugging
+>    further. Surface blockers the moment they appear; do not thrash past 45 minutes.
+> 4. The governor pivot lands next session on top of your JNI layer — keep the inference
+>    call path clean and parameterizable (threads, affinity, n_ctx as runtime arguments,
+>    not compile-time constants). That interface is about to become the whole project.
+
+**Status: plan submitted to the operator, awaiting GO. No implementation started.**
+Superseded by this: the Phase 6A/6B prompts in `docs/PROMPTS.md`, whose hand-tuned
+optimization list is replaced by the governor deriving those same choices at runtime. The
+individual optimizations (thread placement, duty-cycling) survive as *knobs the governor
+turns*, not as separate hand-landed commits.
+
 ## 2026-08-02 — ARCHITECT RULING: blink rate demoted, frame rate annotated
 
 Recorded verbatim, as issued:
