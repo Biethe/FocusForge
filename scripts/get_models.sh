@@ -17,38 +17,54 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# The coach model — SmolLM2-360M-Instruct, Q4_K_M GGUF (Apache-2.0).
+# The coach model — SmolLM2-360M-Instruct GGUF (Apache-2.0).
 #
 # NOT downloaded automatically and NEVER committed. The app holds no INTERNET
-# permission (CLAUDE.md §4.3), so the model reaches the phone by hand:
-# download here on the PC, copy to the phone, import it in-app.
+# permission (CLAUDE.md 4.3), so the model reaches the phone by hand: download
+# here on the PC, copy to the phone, import it in-app.
+#
+# Repos and filenames below were verified against the Hugging Face API on
+# 2026-08-02 — an earlier version of this script said "search for it", which
+# sent the operator to the official repo that publishes only q8_0.
 # ---------------------------------------------------------------------------
 cat <<'INSTRUCTIONS'
 
 === Coach model (manual, one time) ===
 
-1. On this PC, open https://huggingface.co and search for:
+PREFERRED — Q4_K_M, 271 MB. Either of these, both Apache-2.0:
 
-       SmolLM2-360M-Instruct GGUF
+  https://huggingface.co/bartowski/SmolLM2-360M-Instruct-GGUF
+      file: SmolLM2-360M-Instruct-Q4_K_M.gguf
 
-   Use the HuggingFaceTB original or a community GGUF build (bartowski's are
-   the usual ones). Open "Files and versions".
+  https://huggingface.co/unsloth/SmolLM2-360M-Instruct-GGUF
+      file: SmolLM2-360M-Instruct-Q4_K_M.gguf
 
-2. Download the file whose name ends:
+ALSO USABLE — Q8_0, 386 MB, from the official repo:
 
-       ...SmolLM2-360M-Instruct-Q4_K_M.gguf
+  https://huggingface.co/HuggingFaceTB/SmolLM2-360M-Instruct-GGUF
+      file: smollm2-360m-instruct-q8_0.gguf
 
-   Expect roughly 250-300 MB. If the file you are looking at is over 400 MB you
-   have picked a larger quant — go back and take Q4_K_M. Do NOT take a bigger
-   model "for quality": the A20e has 3 GB of RAM and a 700 MB budget.
+  This repo publishes ONLY q8_0 — there is no Q4_K_M there, so do not go
+  looking for one. Q8_0 is 115 MB larger and slower to generate with, because
+  every token moves more weight bytes through memory, and this phone is
+  bandwidth-limited. Fine for proving the pipeline runs; use Q4_K_M for any
+  number we report.
 
-3. Check the licence on the model card says Apache-2.0 before downloading
-   (CLAUDE.md §4.2 allows MIT / Apache-2.0 / BSD only).
+TWO TRAPS:
 
-4. Copy it to the phone over USB, anywhere you can find again — Downloads is
-   fine. Then in FocusForge: "LLM smoke test" -> "Import .gguf model" and pick
-   it. The app copies it into its own storage once; after that the file in
-   Downloads can be deleted.
+  * Do NOT use prithivMLmods/SmolLM2-360M-Instruct-GGUF. It has a Q4_K_M, but
+    it is licensed creativeml-openrail-m, which is not on our allow-list of
+    MIT / Apache-2.0 / BSD (CLAUDE.md 4.2).
+
+  * Ignore any file named Q4_0_4_4, Q4_0_4_8 or Q4_0_8_8. Those are old
+    ARM-repacked formats aimed at dotprod / i8mm / SVE hardware — which this
+    phone does not have — and current llama.cpp has dropped them in favour of
+    repacking at load time.
+
+Check the model card says apache-2.0 before downloading. Then copy the file to
+the phone over USB (Downloads is fine) and, in FocusForge, open
+"LLM smoke test" -> "Import .gguf model" and pick it. The app copies it into
+its own storage once; the copy in Downloads can then be deleted.
 
 The model is gitignored and must never be committed.
 
