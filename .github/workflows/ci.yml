@@ -146,9 +146,28 @@ jobs:
       - name: Run :core signal tests (unit + replay)
         run: ./gradlew -PcoreOnly :core:test --no-daemon
 
+      # :governor is pure Kotlin/JVM for exactly this reason — the same discovery and cost
+      # model that run on the phone run here, on genuinely different Arm silicon.
+      - name: Run :governor tests on Arm
+        run: ./gradlew -PcoreOnly :governor:test --no-daemon
+
+      - name: What this Arm runner looks like to the governor
+        run: |
+          echo "=== the machine the governor would profile here ==="
+          nproc
+          grep -m1 Features /proc/cpuinfo || grep -m1 flags /proc/cpuinfo || true
+          for c in /sys/devices/system/cpu/cpu*/cpufreq/cpuinfo_max_freq; do
+            [ -r "$c" ] && echo "$c = $(cat $c)"
+          done || echo "cpufreq not exposed on this runner"
+
+
       - name: Prove no Android project was built here (CI split rule)
         run: |
           ./gradlew -PcoreOnly projects --no-daemon | tee projects.txt
+          if ! grep -q "Project ':governor'" projects.txt; then
+            echo "::error:::governor is missing from the arm64 build — the cross-silicon exhibit needs it"
+            exit 1
+          fi
           if grep -q "Project ':app'" projects.txt; then
             echo "::error:::app is part of the arm64 build — CI split rule violated"
             exit 1
