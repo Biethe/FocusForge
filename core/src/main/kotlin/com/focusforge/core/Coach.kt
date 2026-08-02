@@ -225,64 +225,53 @@ class CoachPolicy(private val config: CoachConfig = CoachConfig()) {
  */
 object CoachPrompt {
 
+    /**
+     * **Kept short on purpose.** Time to first token includes processing every prompt token,
+     * so prompt length is not a style question — it is latency the user waits through.
+     *
+     * Measured on the A20e (2026-08-02): a 22-token prompt gave TTFT 1240 ms; the first
+     * version of this prompt, at roughly 130 tokens, gave **9727 ms** — over three times the
+     * 3000 ms contract. Every line below has to earn its tokens.
+     */
     fun build(
         context: CoachContext,
         language: CoachLanguage,
         maxWords: Int = CoachThresholds.MAX_WORDS,
     ): String {
         val minutes = context.elapsedMs / 60_000
+        val blink = context.blinkRatePerMin?.let { ", ${fmt(it)} blinks/min" } ?: ""
         return when (language) {
-            CoachLanguage.ENGLISH -> buildString {
-                append("You are a supportive focus coach. Reply with ONE short message to the ")
-                append("person studying, at most $maxWords words. Speak to them directly. ")
-                append("No lists, no headings, no preamble. Answer in English.\n\n")
-                append("Their last few minutes, by the numbers:\n")
-                append("- focus score ${context.recentMeanScore} out of 100\n")
-                append("- looking at their work ${context.gazeOnScreenPercent}% of the time\n")
-                append("- ${context.longClosures} long eye closures\n")
-                append("- head movement ${fmt(context.headMovementDeg)} degrees\n")
-                context.blinkRatePerMin?.let {
-                    append("- blink rate ${fmt(it)} per minute\n")
-                }
-                append("- ${minutes} minutes into the session\n\n")
-                append("Why you are speaking now: ${reason(context.trigger, CoachLanguage.ENGLISH)}\n")
-            }
-            CoachLanguage.FRENCH -> buildString {
-                append("Tu es un coach de concentration bienveillant. Réponds par UN seul court ")
-                append("message à la personne qui étudie, $maxWords mots maximum. Parle-lui ")
-                append("directement. Pas de liste, pas de titre, pas d'introduction. ")
-                append("Réponds en français.\n\n")
-                append("Ses dernières minutes, en chiffres :\n")
-                append("- score de concentration ${context.recentMeanScore} sur 100\n")
-                append("- regard sur son travail ${context.gazeOnScreenPercent}% du temps\n")
-                append("- ${context.longClosures} fermetures des yeux prolongées\n")
-                append("- mouvement de la tête ${fmt(context.headMovementDeg)} degrés\n")
-                context.blinkRatePerMin?.let {
-                    append("- ${fmt(it)} clignements par minute\n")
-                }
-                append("- ${minutes} minutes depuis le début\n\n")
-                append("Pourquoi tu parles maintenant : ${reason(context.trigger, CoachLanguage.FRENCH)}\n")
-            }
+            CoachLanguage.ENGLISH ->
+                "Encourage someone studying. One message, max $maxWords words, speak to them " +
+                    "directly, no lists.\n" +
+                    "Last minutes: focus ${context.recentMeanScore}/100, " +
+                    "eyes on work ${context.gazeOnScreenPercent}%, " +
+                    "${context.longClosures} long eye closures, " +
+                    "head ${fmt(context.headMovementDeg)} deg$blink, ${minutes} min in.\n" +
+                    "${reason(context.trigger, language)}\n"
+
+            CoachLanguage.FRENCH ->
+                "Encourage une personne qui étudie. Un seul message, $maxWords mots maximum, " +
+                    "tutoie-la, pas de liste. Réponds en français.\n" +
+                    "Dernières minutes : concentration ${context.recentMeanScore}/100, " +
+                    "regard sur le travail ${context.gazeOnScreenPercent}%, " +
+                    "${context.longClosures} fermetures des yeux prolongées, " +
+                    "tête ${fmt(context.headMovementDeg)} deg$blink, ${minutes} min écoulées.\n" +
+                    "${reason(context.trigger, language)}\n"
         }
     }
 
     private fun reason(trigger: CoachTrigger, language: CoachLanguage): String =
         when (language) {
             CoachLanguage.ENGLISH -> when (trigger) {
-                CoachTrigger.FATIGUE ->
-                    "their eyes have been closing for longer than normal blinks — they look tired."
-                CoachTrigger.LOW_FOCUS ->
-                    "their attention has been drifting for a couple of minutes."
-                CoachTrigger.MILESTONE ->
-                    "it is a routine check-in at a round number of minutes, not a problem."
+                CoachTrigger.FATIGUE -> "They look tired: eyes closing longer than blinks."
+                CoachTrigger.LOW_FOCUS -> "Their attention has been drifting."
+                CoachTrigger.MILESTONE -> "Routine check-in, nothing is wrong."
             }
             CoachLanguage.FRENCH -> when (trigger) {
-                CoachTrigger.FATIGUE ->
-                    "ses yeux se ferment plus longtemps que des clignements normaux — elle semble fatiguée."
-                CoachTrigger.LOW_FOCUS ->
-                    "son attention dérive depuis deux minutes."
-                CoachTrigger.MILESTONE ->
-                    "c'est un point d'étape de routine, pas un problème."
+                CoachTrigger.FATIGUE -> "Elle semble fatiguée : yeux fermés plus longtemps que des clignements."
+                CoachTrigger.LOW_FOCUS -> "Son attention dérive."
+                CoachTrigger.MILESTONE -> "Point d'étape de routine, rien d'anormal."
             }
         }
 

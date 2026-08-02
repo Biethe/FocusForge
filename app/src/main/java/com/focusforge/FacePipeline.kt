@@ -48,6 +48,15 @@ class FacePipeline(
     private var bitmapBuffer: Bitmap? = null
     private var previewView: PreviewView? = null
 
+    /**
+     * When true, frames are drained but not sent to the detector.
+     *
+     * The camera keeps running — stopping and restarting it would take longer than the pause
+     * — but MediaPipe does not, which hands its share of the CPU to whatever needs it more.
+     * Phase 6's governor will own this; for now the coach raises it while generating.
+     */
+    @Volatile var paused = false
+
     /** Size of the upright frame actually handed to the detector. */
     @Volatile var analysisWidth = 0
         private set
@@ -112,6 +121,11 @@ class FacePipeline(
     }
 
     private fun analyzeFrame(image: ImageProxy) {
+        if (paused) {
+            // Close the proxy without doing any work: holding it would stall the camera.
+            image.close()
+            return
+        }
         perf.onFrame()
         val buffer = bitmapBuffer ?: Bitmap.createBitmap(
             image.width, image.height, Bitmap.Config.ARGB_8888).also { bitmapBuffer = it }

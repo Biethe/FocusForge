@@ -5,6 +5,41 @@
 > Every optimization gets before/after numbers from committed benchmark files —
 > negative results are kept and reported honestly.
 
+## 2026-08-02 — The coach works on-device, and it violates the TTFT contract
+
+**It generated text on the A20e.** That is the last unproven piece of Phase 5. Measured
+alongside a live camera session: **TTFT 9727 ms, 7.6 tok/s, RSS peak 580 MB.**
+
+Decode passes (7.6 vs a floor of 5) and memory passes (580 vs 700). **TTFT fails the
+3000 ms contract by more than 3x**, and both causes are identifiable rather than mysterious:
+
+1. **Prompt length, the dominant term.** TTFT includes processing every prompt token. The
+   smoke test's 22-token prompt gave 1240 ms; the coach prompt was ~130 tokens. Scaling
+   linearly predicts ~7300 ms, which accounts for most of the 9727.
+2. **CPU contention, the rest.** The vision loop runs MediaPipe on every frame on the same
+   2×A73 + 6×A53 as the model. Decode also fell from 13.0 tok/s (idle) to 7.6 (camera live) —
+   the same effect measured on the generation side, where prompt length plays no part.
+
+Two fixes, both of which are also the right design:
+
+- **The prompt is halved**, 232 chars against 479 — roughly 58 tokens against 130. Prompt
+  length is not a style question when TTFT is a contract term; it is latency the user waits
+  through. A test now fails if any prompt exceeds 400 characters, with the measurement in the
+  failure message.
+- **The vision loop stands down while the model works** (`FacePipeline.paused`). The camera
+  keeps running — restarting it would cost more than the pause — but MediaPipe does not.
+  This is a **preview of the Phase 6 governor's fps-budget knob**: here as a fixed rule,
+  there as a measured decision. It is the first real evidence that the knob is worth having.
+
+**Expected but NOT MEASURED YET.** Halving the prompt should roughly halve the prompt-processing
+term and removing contention should recover part of the rest, but the only honest number is
+the next on-device run. No projected TTFT is recorded anywhere.
+
+**This is the governor's case study.** A hand-tuned build would stop here with two fixes and a
+better number. The Phase 6 pitch is that the runtime should notice a contract violation and
+turn the knob itself — and we now have a measured violation, an identified knob, and a
+before number to compare against.
+
 ## 2026-08-02 — Two bugs the first coach session exposed, and a reverted fix
 
 Session: `bench/sessions/session-sm-a202f-20260802-155732.json`, 1.7 min, 0.5.3, RSS peak

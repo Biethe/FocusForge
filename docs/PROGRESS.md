@@ -5,6 +5,53 @@
 > "operator confirmed: &lt;what was seen&gt;". If something is not measured yet, it says
 > `NOT MEASURED YET`.
 
+## 2026-08-02 — The coach speaks on the phone, and it is too slow
+
+**Did**
+- **It works.** The coach generated a real message on your phone, offline. That was the last
+  unproven part of Phase 5.
+- Three numbers came back: **9.7 seconds to the first word**, 7.6 words per second, and
+  580 MB of memory. Memory is fine. Speaking speed is fine. **The 9.7 seconds is a failure** —
+  the target is under 3 — and I can account for it rather than guess:
+  - **Most of it is the prompt.** The phone has to read the whole question before it can
+    start answering. My question to the model was about six times longer than the one in the
+    speed test, and the speed test took 1.2 seconds. That alone explains around 7 of the 9.7.
+  - **The rest is the camera.** The face tracker was running on the same processor the whole
+    time. You can see it in the other number too: word rate dropped from 13 per second when
+    the phone was doing nothing else to 7.6 with the camera live.
+- **Fixed the scrolling bug you hit.** The screen was not scrollable, so a long coaching
+  message pushed the export button off the bottom. A button you cannot reach is a button that
+  does not exist. The screen scrolls now.
+- **Halved the prompt** — 232 characters where it was 479. Every sentence I wrote for the
+  model was time you spend waiting.
+- **The face tracker now pauses while the coach is thinking.** A few seconds without tracking
+  costs us almost nothing; running both at once costs seconds of your time.
+
+**Evidence**
+- Operator-confirmed on the A20e, 2026-08-02: TTFT 9727 ms, 7.6 tok/s, RSS peak 580 MB.
+- 120 `:core` tests pass, including a new one that **fails if any prompt grows past 400
+  characters** — with the measurement in the error message, so the next person to add a line
+  sees what it costs.
+
+**I am deliberately not telling you how fast it will be now.** Halving the prompt should
+roughly halve the biggest part, and pausing the camera should recover some of the rest, but
+the only number worth having is the one your phone produces. There is no predicted figure in
+any document.
+
+**Next — what you do**
+1. Install `0.5.5-latency`, run a session in **airplane mode**, trigger the coach with slow
+   blinks.
+2. **Screenshot the message with the airplane icon visible** — still the required submission
+   artifact.
+3. Export the session JSON (the button is reachable now) and send it.
+
+**Worth knowing: this failure is the Phase 6 pitch.**
+An ordinary project would fix these two things by hand and move on. The whole argument of the
+next phase is that the app should notice it broke its own promise and turn the dial itself.
+We now have a measured violation, the exact knob that fixes it, and a before-number to beat.
+
+---
+
 ## 2026-08-02 — The first coach session found two bugs (and memory is fine)
 
 **Did**

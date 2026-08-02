@@ -14,6 +14,7 @@ import android.view.WindowManager
 import android.widget.Button
 import android.widget.FrameLayout
 import android.widget.LinearLayout
+import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.ComponentActivity
@@ -181,7 +182,10 @@ class SessionActivity : ComponentActivity() {
                 setMargins(pad, pad / 2, pad, pad)
             })
         }
-        setContentView(root)
+        // Scrollable, because the coach's message is variable-height and pushed the export
+        // button off the bottom of the screen on the operator's device (2026-08-02). A
+        // control that exists but cannot be reached is a control that does not exist.
+        setContentView(ScrollView(this).apply { addView(root) })
 
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA)
             == PackageManager.PERMISSION_GRANTED) {
@@ -216,6 +220,12 @@ class SessionActivity : ComponentActivity() {
                 synchronized(sessionLock) { sessionBuilder?.addCoachMessage(message) }
             },
             onStatus = { status -> coachStatus = status },
+            // The vision loop and the LLM share 2 A73s and 6 A53s. Running MediaPipe every
+            // frame while the model processes a prompt cost measurable latency on the phone
+            // (see docs/DECISIONS.md 2026-08-02). Standing the detector down for the few
+            // seconds a message takes is the honest fix, and it is a preview of the Phase 6
+            // governor's fps-budget knob — here as a fixed rule, there as a measured decision.
+            setVisionPaused = { paused -> pipeline?.paused = paused },
         ).also { it.start() }
     }
 

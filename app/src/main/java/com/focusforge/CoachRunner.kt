@@ -32,6 +32,8 @@ class CoachRunner(
     private val onMessage: (CoachMessage, String) -> Unit,
     /** Called on a worker thread whenever the runner's state changes, for the UI line. */
     private val onStatus: (String) -> Unit,
+    /** Stands the vision loop down while the model works. See [FacePipeline.paused]. */
+    private val setVisionPaused: (Boolean) -> Unit = {},
 ) {
     @Volatile var language: CoachLanguage = CoachLanguage.ENGLISH
 
@@ -89,6 +91,7 @@ class CoachRunner(
         state = State.GENERATING
         onStatus("coach — thinking…")
         worker.execute {
+            setVisionPaused(true)
             try {
                 val prompt = CoachPrompt.build(context, lang)
                 val result = LlamaBridge.generate(open, prompt, MAX_TOKENS)
@@ -114,6 +117,7 @@ class CoachRunner(
                 Log.e(TAG, "coach generation threw", e)
                 onStatus("coach error: ${e.message}")
             } finally {
+                setVisionPaused(false)
                 state = State.READY
                 generating.set(false)
             }

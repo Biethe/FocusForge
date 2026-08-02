@@ -238,7 +238,7 @@ class CoachPromptTest {
         val p = CoachPrompt.build(context(), CoachLanguage.ENGLISH)
         assertTrue(p.contains("42"), p)
         assertTrue(p.contains("55%"), p)
-        assertTrue(p.contains("23 minutes"), p)
+        assertTrue(p.contains("23 min"), p)
         assertTrue(p.contains("40 words"), p)
         assertTrue(p.contains("tired"), "the reason should be stated in words: $p")
     }
@@ -249,12 +249,12 @@ class CoachPromptTest {
         // reason ("longer than normal blinks"), which is prose, not a measurement — an
         // earlier version of this test failed on exactly that and was testing the wrong thing.
         val p = CoachPrompt.build(context(), CoachLanguage.ENGLISH)
-        assertFalse(p.contains("blink rate"), "an undersampled rate reached the model: $p")
+        assertFalse(p.contains("blinks/min"), "an undersampled rate reached the model: $p")
 
         val withRate = CoachPrompt.build(
             context().copy(blinkRatePerMin = 14.0), CoachLanguage.ENGLISH,
         )
-        assertTrue(withRate.contains("blink rate 14"), "a valid rate should be included: $withRate")
+        assertTrue(withRate.contains("14.0 blinks/min"), "a valid rate should be included: $withRate")
     }
 
     @Test
@@ -271,6 +271,23 @@ class CoachPromptTest {
                 val p = CoachPrompt.build(context(t), lang)
                 assertTrue(p.length > 200, "prompt for $t/$lang looks truncated")
                 assertNotNull(p.lines().last { it.isNotBlank() })
+            }
+        }
+    }
+
+    @Test
+    fun `the prompt stays short, because its length is latency the user waits through`() {
+        // Time to first token includes processing every prompt token. Measured on the A20e:
+        // a 22-token prompt gave TTFT 1240 ms; a ~130-token prompt gave 9727 ms, over three
+        // times the 3000 ms contract. This is a latency budget, not a style preference.
+        for (trigger in CoachTrigger.entries) {
+            for (lang in CoachLanguage.entries) {
+                val p = CoachPrompt.build(context(trigger), lang)
+                assertTrue(
+                    p.length <= 400,
+                    "prompt for $trigger/$lang is ${p.length} chars (~${p.length / 4} tokens); " +
+                        "budget is 400 chars. Every added line is milliseconds of TTFT.",
+                )
             }
         }
     }
