@@ -187,6 +187,57 @@ class GovernorTest {
             "made ${g.decisions.size} changes while the input hovered: ${g.decisions.map { it.knob }}")
     }
 
+    // ------------------------------------------------------------------ direction
+
+    @Test
+    fun `a starved frame rate is never answered by cutting the frame budget`() {
+        // Found on the operator's phone (2026-08-02). The session achieved 4.74 fps against a
+        // 5.0 floor, and the governor answered by cutting the budget from 8.0 to 6.0 —
+        // which cannot raise a frame rate under any circumstances. A knob has to be chosen
+        // for its direction, not only for being the cheapest rung on the ladder.
+        val g = Governor(profile(visionFps = 8.0))
+        val starved = WindowMeasurement(elapsedMs = 30_000, ttftMs = 1500,
+            decodeTokPerSec = 14.0, visionFps = 4.74, rssBytes = 560L * 1024 * 1024)
+
+        g.observe(starved)
+        val decision = g.observe(starved.copy(elapsedMs = 60_000))
+        assertNotNull(decision)
+        assertTrue(
+            g.current.visionFpsBudget >= 8.0,
+            "the budget went to ${g.current.visionFpsBudget} while the frame rate was already " +
+                "short — that can only make the violated term worse",
+        )
+    }
+
+    @Test
+    fun `a budget that is plainly not the cause is exonerated and the ladder continues`() {
+        // 3.0 fps budget, 2.0 achieved: the budget is close to the achievement, so it is
+        // blamed. But with a budget far above what the camera manages, the device simply
+        // cannot go faster and this knob is not the answer.
+        val g = Governor(profile(visionFps = 8.0))
+        val hopeless = WindowMeasurement(elapsedMs = 30_000, ttftMs = 1500,
+            decodeTokPerSec = 14.0, visionFps = 1.0, rssBytes = 560L * 1024 * 1024)
+        g.observe(hopeless)
+        val decision = g.observe(hopeless.copy(elapsedMs = 60_000))
+        assertNotNull(decision)
+        assertTrue(
+            decision.knob != "visionFpsBudget",
+            "a budget of 8.0 against 1.0 achieved is not the constraint; got ${decision.knob}",
+        )
+    }
+
+    @Test
+    fun `a slow model is still answered by giving it the frame budget`() {
+        // The original behaviour must survive the fix: when TTFT is what missed, taking
+        // frames away from the detector is exactly right.
+        val g = Governor(profile(visionFps = 8.0))
+        g.observe(slow(30_000))
+        val decision = g.observe(slow(60_000))
+        assertNotNull(decision)
+        assertEquals("visionFpsBudget", decision.knob)
+        assertEquals(6.0, g.current.visionFpsBudget, 0.01)
+    }
+
     // ------------------------------------------------------------------ the record
 
     @Test

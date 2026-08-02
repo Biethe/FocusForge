@@ -81,10 +81,19 @@ class Governor(
 
     private fun act(window: WindowMeasurement, trigger: ContractCheck): GovernorDecision? {
         // The ladder. Cheapest and most reversible first.
-        val decision = tryLowerVisionFps(window, trigger)
-            ?: tryLowerContext(window, trigger)
-            ?: tryChangeThreads(window, trigger)
-            ?: GovernorDecision(
+        //
+        // Except when the frame rate itself is what missed: lowering the frame budget cannot
+        // possibly raise the achieved frame rate, and on the A20e the first version did
+        // exactly that — answered "visionFps = 4.74 VIOLATES 5" by cutting the budget from
+        // 8.0 to 6.0. A knob has to be chosen for its direction, not only its cheapness.
+        val decision = if (trigger.term == "visionFps") {
+            tryRaiseVisionFps(window, trigger) ?: tryLowerContext(window, trigger)
+                ?: tryChangeThreads(window, trigger)
+        } else {
+            tryLowerVisionFps(window, trigger)
+                ?: tryLowerContext(window, trigger)
+                ?: tryChangeThreads(window, trigger)
+        } ?: GovernorDecision(
                 atMs = window.elapsedMs,
                 knob = "none",
                 from = "", to = "",
@@ -119,6 +128,41 @@ class Governor(
             note = "vision and the model share this CPU; lowering the frame budget returns " +
                 "cycles to the term that missed. Measured on the A20e: standing the detector " +
                 "down during generation moved decode from 7.6 to 11.8 tok/s",
+        )
+    }
+
+    /**
+     * The frame rate itself is short. Raise the budget if the budget is what is holding it
+     * back; otherwise say so and let the ladder continue.
+     *
+     * A budget already far above the achieved rate is not the cause — the device simply
+     * cannot go faster, and pretending a knob helps would be worse than admitting it does
+     * not.
+     */
+    private fun tryRaiseVisionFps(window: WindowMeasurement, trigger: ContractCheck): GovernorDecision? {
+        val achieved = window.visionFps ?: return null
+        val budget = current.visionFpsBudget
+        val ceiling = profile.chosen.visionFpsBudget
+
+        // Only the budget can be blamed when it is close to, or below, what was achieved.
+        if (budget > achieved * BUDGET_BLAME_MARGIN) return null
+        if (budget >= ceiling - 0.01) return null
+
+        val to = (budget + config.visionFpsStep).coerceAtMost(ceiling)
+        current = current.copy(visionFpsBudget = to)
+        return GovernorDecision(
+            atMs = window.elapsedMs,
+            knob = "visionFpsBudget",
+            from = "%.1f".format(budget),
+            to = "%.1f".format(to),
+            applied = true,
+            trigger = trigger,
+            note = "the frame rate missed its floor while the budget (%.1f) was at or below "
+                .format(budget) +
+                "what the camera achieved (%.1f), so the budget was the constraint. Raising "
+                    .format(achieved) +
+                "it. Lowering it here — which an earlier version did — could only have made " +
+                "the violated term worse",
         )
     }
 
@@ -207,6 +251,14 @@ data class GovernorConfig(
     val visionFpsFloor: Double = 3.0,
     val nCtxFloor: Int = 128,
 )
+
+/**
+ * How far above the achieved rate a budget has to be before it is exonerated.
+ *
+ * A limiter never delivers exactly its target, so a budget within this factor of the
+ * measured rate is treated as the binding constraint.
+ */
+private const val BUDGET_BLAME_MARGIN = 1.5
 
 /**
  * Serialises a decision for a host that does not depend on a JSON library itself.

@@ -66,7 +66,20 @@ class FacePipeline(
      */
     @Volatile var targetFps: Double? = null
 
-    private var lastProcessedMs = 0L
+    /**
+     * When the next frame is due, for the frame-budget limiter.
+     *
+     * Deliberately a *due time that accumulates* rather than "has enough time passed since
+     * the last one". The naive version halves the frame rate whenever the budget sits just
+     * below the camera's natural rate: at 8.4 fps delivered and an 8.0 fps budget every
+     * frame arrives 6 ms early, so every frame is rejected and only every second one gets
+     * through. Measured on the A20e — a session ran at 4.5 fps under an 8.0 fps budget and
+     * tripped the governor's own contract (2026-08-02).
+     *
+     * Advancing a due time by exactly one interval, floored at now, converges on the target
+     * average instead.
+     */
+    private var nextFrameDueMs = 0L
 
     /** Size of the upright frame actually handed to the detector. */
     @Volatile var analysisWidth = 0
@@ -142,13 +155,13 @@ class FacePipeline(
         // takes hundreds of milliseconds.
         targetFps?.let { fps ->
             if (fps > 0) {
-                val minGapMs = (1000.0 / fps).toLong()
+                val intervalMs = (1000.0 / fps).toLong()
                 val now = SystemClock.uptimeMillis()
-                if (now - lastProcessedMs < minGapMs) {
+                if (now < nextFrameDueMs) {
                     image.close()
                     return
                 }
-                lastProcessedMs = now
+                nextFrameDueMs = maxOf(now, nextFrameDueMs + intervalMs)
             }
         }
         perf.onFrame()

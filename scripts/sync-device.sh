@@ -130,6 +130,10 @@ pull_dir() {
 echo "Pulling derived data (numbers only — no image data is produced by the app):"
 pull_dir "$REMOTE/sessions" "bench/sessions"  "session exports"
 pull_dir "$REMOTE/replays"  "bench/replays"   "landmark recordings"
+# The device profile the phone derived for itself — the other half of the cross-silicon
+# exhibit, and the reason ProfileStore writes it beside the sessions rather than somewhere
+# only a human could reach.
+pull_dir "$REMOTE/profiles" "bench/profiles/incoming" "device profiles"
 
 # Screenshots: staged, never auto-committed, and only ones taken in the last few days.
 #

@@ -4,6 +4,7 @@ Two machines. One code path. Two genuinely different answers, each carrying the 
 that produced it.
 
 | | Samsung Galaxy A20e | GitHub `ubuntu-24.04-arm` |
+|
 |---|---|---|
 | silicon | Exynos 7884B, 2018 | Neoverse-class server part |
 | topology | **8 cores, 2 clusters** (2×A73 @1.56 GHz + 6×A53 @1.35 GHz) | **4 cores, 1 cluster** |
@@ -16,6 +17,31 @@ that produced it.
 Neither number was configured. Both were derived by `ProfileDeriver` from measurements taken
 on that machine, against the same checked-in `PerformanceContract`, and both profiles embed
 the raw evidence so the choice can be disputed or re-derived under a different contract.
+
+## `a20e-selfbench` — the phone profiling itself
+
+`a20e.device.profile.json` was derived on a build machine from the operator's committed
+benchmark. `a20e-selfbench.device.profile.json` is the phone running the whole thing on its
+own: measuring, fitting, choosing and writing the file, in 90 seconds, unattended.
+
+It is the better artifact, and it validates the automated path against the hand-run one:
+
+| threads | hand-run benchmark | phone's self-benchmark |
+|---|---|---|
+| 1 | — | 117.8 ms/token |
+| 2 | 59.2 | **58.3** (−1.5%) |
+| 4 | 41.7 | not in its sweep |
+| 6 | 32.0 | **33.4** (+4.4%) |
+| 8 | — | 29.4 ms/token |
+
+The sweeps differ because the phone derives its own from its topology — 1, 2, 6, 8, being
+the cluster sizes and the whole machine — and never tries 4, which was a number I picked by
+hand. It also measured 1 and 8, which I never did.
+
+**It chose 6 threads even though 8 is faster.** Two threads would need 3090 ms for the
+typical prompt against a 3000 ms limit and misses; six needs 1770 ms and complies. Eight
+would be quicker still and is left alone. Cheapest that complies, not fastest — spare cores
+on a phone are battery and heat.
 
 ## Read the workload field before comparing milliseconds
 
