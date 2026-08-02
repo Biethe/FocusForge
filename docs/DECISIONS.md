@@ -5,6 +5,38 @@
 > Every optimization gets before/after numbers from committed benchmark files —
 > negative results are kept and reported honestly.
 
+## 2026-08-02 — Phase 5 GATE PASSED with real numbers, and one new risk
+
+Measured on the A20e, build 0.5.2, q8_0 (386 MB), 2 threads, n_ctx 512.
+Full record: `bench/results/a20e-phase5-gate-20260802.json`.
+
+| | target | measured | headroom |
+|---|---|---|---|
+| TTFT (model resident) | <= 3000 ms | **1240 ms** | 2.4x |
+| decode | >= 5 tok/s | **13.0 tok/s** | 2.6x |
+| RSS peak | <= 700 MB | **557 MB** | 143 MB |
+
+- **All three contract targets pass on the slower quant.** The shipping model is Q4_K_M at
+  271 MB, which moves fewer weight bytes per token on a bandwidth-limited CPU, so these are
+  floors rather than results.
+- The two runs agree to within 7% on TTFT and 1% on decode, which is what a stable
+  measurement looks like and gives the governor something trustworthy to benchmark against.
+- The model costs **421 MB of RSS for a 386 MB file** — the mmapped weights fully faulted in
+  plus ~35 MB of context, KV cache and compute buffers.
+
+### New risk: the camera and the model have never been resident at the same time
+
+That 557 MB was measured with **no camera running**. A real session runs CameraX and MediaPipe
+FaceLandmarker alongside the model, and their cost adds on top of the 133 MB baseline rather
+than into it. The camera-screen RSS has been outstanding since Phase 2 and is now on the
+critical path rather than a nice-to-have.
+
+Arithmetic, to make the stakes explicit: with q8_0 the LLM costs 421 MB, leaving 279 MB for
+everything else including the vision pipeline. With Q4_K_M it costs roughly 306 MB, leaving
+394 MB. **If the vision pipeline turns out to need more than ~280 MB, Q4_K_M stops being a
+preference and becomes a requirement.** Requested from the operator; no design changes until
+it is measured.
+
 ## 2026-08-02 — Phase 5.0b: GATE PASSED, and the model is held open
 
 - **The gate is passed on the A20e.** Build `0.5.1` generated 20 tokens: **11.4 tok/s decode**

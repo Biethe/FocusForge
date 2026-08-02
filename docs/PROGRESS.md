@@ -5,6 +5,53 @@
 > "operator confirmed: &lt;what was seen&gt;". If something is not measured yet, it says
 > `NOT MEASURED YET`.
 
+## 2026-08-02 — Phase 5 gate PASSED on all three targets
+
+**Did**
+- You re-ran with the fixed timing and the numbers are good on every measure:
+
+  | | target | your phone | how much room |
+  |---|---|---|---|
+  | time to first word | under 3 s | **1.24 s** | 2.4x |
+  | words per second | at least 5 | **13.0** | 2.6x |
+  | memory | under 700 MB | **557 MB** | 143 MB spare |
+
+- And that is with the **bigger, slower** model file. The one we ship is 115 MB smaller and
+  should be faster still.
+- The earlier "3149 ms" is now explained: about 1.9 seconds of it was your phone reading the
+  model off storage. Opening the model happens once; answering a message happens often, and
+  that part takes 1.24 seconds.
+- Your two runs agreed to within 1% on speed. That matters more than it sounds — it means the
+  measurement is stable enough for the Phase 6 self-benchmark to make decisions from.
+- Recorded everything in `bench/results/a20e-phase5-gate-20260802.json`, including which
+  numbers are measured and which one is inferred, so the architect can see the difference.
+
+**Evidence**
+- Operator-confirmed on the A20e, 2026-08-02, build `0.5.2-warm-ttft`:
+  run 1 TTFT 1240 ms, 13.0 tok/s, 21-token prompt;
+  run 2 TTFT 1323 ms, 12.9 tok/s, 23-token prompt;
+  RSS 133 MB before opening the model, 554 MB after loading it, 557 MB after generating.
+
+**A new problem I want to flag before it bites us**
+- **The camera was not running during that test.** In a real session the camera, the face
+  tracker and the language model all have to fit in memory *at the same time*, and their costs
+  add up rather than overlap.
+- The model alone takes 421 MB of the 700 MB budget, leaving 279 MB for everything else. With
+  the smaller model file it would take about 306 MB, leaving 394 MB.
+- **So I need one number I have been asking for since Phase 2:** open the app, tap **Start
+  focus session**, let it run ten seconds, and read me the MB figure on the line under the
+  score (it looks like `session 00:12 · 9.1 fps · 210 MB`). That tells us whether both halves
+  of this app can coexist, and it decides whether the smaller model is a preference or a
+  requirement.
+
+**Next**
+- Building the coach itself (Phase 5.2): event-triggered messages, English/French, with the
+  measured speed shown on screen and written into the session file.
+- The memory question above does not block that work, but it may change where the model lives
+  — kept open all session, or opened only when a message is due.
+
+---
+
 ## 2026-08-02 — GATE PASSED: the coach model runs on your phone
 
 **Did**
