@@ -125,8 +125,11 @@ class DeviceProfileTest {
             availableModels = listOf("smollm2-q4_k_m.gguf", "smollm2-q8_0.gguf"))
 
         val why = profile.reasons.single { it.knob == "modelFile" }.because
-        assertTrue(why.contains("NOT a measured"), "a guess must announce itself: $why")
-        assertTrue(why.contains("preference"), why)
+        assertTrue(why.contains("NOT a measurement"), "a guess must announce itself: $why")
+        // ...and since 2026-08-02 it must also carry the measurement that contradicts the
+        // assumption behind it: on Armv8.0, the smaller quantisation was 19-35% SLOWER.
+        assertTrue(why.contains("slower"), "the counter-evidence must travel with it: $why")
+        assertTrue(why.contains("memory"), why)
     }
 
     @Test
