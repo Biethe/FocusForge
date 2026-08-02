@@ -5,6 +5,43 @@
 > "operator confirmed: &lt;what was seen&gt;". If something is not measured yet, it says
 > `NOT MEASURED YET`.
 
+## 2026-08-02 — GATE PASSED: the coach model runs on your phone
+
+**Did**
+- **It works.** Your phone generated 20 tokens: **11.4 tokens per second**, against a target
+  of 5. And that was with the *bigger, slower* q8_0 model — the one we will actually ship is
+  smaller and should be quicker still. The Aug 4 decision gate is met, two days early.
+- **But one of the two numbers you sent is not what it claims to be, and I need to correct it
+  before it goes in a report.** The "TTFT 3149 ms" includes **loading the model** — my code
+  started the stopwatch before opening a 386 MB file, so most of those 3.1 seconds were the
+  phone reading from storage, not thinking. Real time-to-first-word, with the model already
+  open, will be far lower. I have not measured it yet, so I am not going to guess it.
+- Rewrote the plumbing so the model **stays open** between messages, and load time and
+  thinking time are timed separately. This was needed regardless: a coach that reloaded a
+  386 MB model for every sentence would be unusable, and the Phase 6 self-benchmark has only
+  60 seconds to try several configurations.
+- The test screen now runs **twice on one open model**, with two different questions — a cold
+  run and a warm one — so we see both numbers from a single tap.
+
+**Evidence**
+- Operator confirmed on the A20e, 2026-08-02: 20 tokens, decode 11.4 tok/s, total 4815 ms,
+  cold figure 3149 ms including model load. Model: q8_0, 386 MB.
+- The instruction-level verification from earlier now has hardware backing: the app ran, so
+  nothing in it is illegal on this CPU.
+
+**Next — what you do**
+1. Install `0.5.2-warm-ttft`. **LLM smoke test → Generate 20 tokens.**
+2. Send the whole block this time — **especially the MEMORY section**. I still do not have
+   your RSS figures, and the architect's rule is that if memory goes over 700 MB we stop and
+   report before building anything further. It is the one number I am missing.
+
+**Risks**
+- If memory does exceed 700 MB, we stop. That is the architect's instruction, not my
+  judgement call, and q8_0 is the worst case at 386 MB — the Q4_K_M we ship is 271 MB.
+- Everything measured so far is the slow quant. Treat 11.4 tok/s as a floor.
+
+---
+
 ## 2026-08-02 — Phase 5.0a: the big risk is gone; the model just had nothing to say
 
 **Did**

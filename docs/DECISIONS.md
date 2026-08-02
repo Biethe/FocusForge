@@ -5,6 +5,33 @@
 > Every optimization gets before/after numbers from committed benchmark files —
 > negative results are kept and reported honestly.
 
+## 2026-08-02 — Phase 5.0b: GATE PASSED, and the model is held open
+
+- **The gate is passed on the A20e.** Build `0.5.1` generated 20 tokens: **11.4 tok/s decode**
+  against a contract floor of 5, on the *slower* q8_0 quant (386 MB). llama.cpp runs on
+  Armv8.0-A hardware with no dotprod, no i8mm, no SVE.
+- **The reported "TTFT 3149 ms" is not TTFT and must not be recorded as such.** Our first
+  implementation loaded, generated and freed in a single call, and started the clock before
+  `llama_model_load_from_file` — so that figure is mapping and faulting in a 386 MB file off
+  eMMC, plus prompt processing, plus one token. It is a *cold-start* number.
+- **Changed:** the model is now held open behind a handle. `nativeLoad` / `nativeGenerate` /
+  `nativeFree`, with load time and TTFT measured separately, because they are separate
+  things: load happens once per session, TTFT happens per coaching message, and the contract
+  is about the second one.
+- **Three reasons this had to change anyway**, so it is not rework:
+  1. A coach that reloaded a 386 MB model per message would be unusable.
+  2. The governor's 60-second self-benchmark cannot afford a multi-second reload per
+     configuration.
+  3. Amendment 4 asks for a parameterizable call path; threads and `n_ctx` are fixed at
+     context creation in llama.cpp, so "change thread placement" means "open a new session",
+     which is only affordable when load is measured and understood.
+- The smoke test now runs **two generations on one open model** with different prompts —
+  cold and warm — because reporting either alone would misrepresent the device.
+- `llama_memory_clear` between runs, so run 2 is not cheaper than run 1 for reasons that have
+  nothing to do with the silicon.
+- **Still outstanding:** the operator reported timings but not the RSS block, and amendment 2
+  makes RSS a stop condition. Requested with the next run.
+
 ## 2026-08-02 — Phase 5.0a: the gate's real result, and the chat template
 
 - **The SIGILL risk is retired.** The operator ran build 0.5.0 on the A20e and the app did

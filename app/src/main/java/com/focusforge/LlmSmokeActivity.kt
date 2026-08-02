@@ -146,65 +146,84 @@ class LlmSmokeActivity : Activity() {
             return
         }
         runButton.isEnabled = false
-        output.text = "Loading model and generating 20 tokens…\n" +
-            "This is the first time this silicon has run the model — it may take a while."
+        output.text = "Opening the model and generating twice…\n" +
+            "Run 1 is cold, run 2 reuses the open model. That difference is the point."
 
         worker.execute {
             val rssBefore = LlamaBridge.rssBytes()
-            val r = LlamaBridge.generate(
-                modelPath = model.absolutePath,
-                prompt = PROMPT,
-                threads = THREADS,
-                nCtx = N_CTX,
-                maxTokens = MAX_TOKENS,
-            )
+            val session = LlamaBridge.open(model.absolutePath, THREADS, N_CTX)
+            if (session == null) {
+                runOnUiThread {
+                    runButton.isEnabled = true
+                    output.text = "FAIL — could not open the model\n\n${LlamaBridge.lastError}"
+                }
+                return@execute
+            }
+            // Two generations on the same open model. The first pays for any lazily-faulted
+            // pages of the mmapped weights; the second is the steady state a coach message
+            // would actually see. Reporting only one of them would misrepresent the phone.
+            val cold = LlamaBridge.generate(session, PROMPT, MAX_TOKENS)
+            val warm = LlamaBridge.generate(session, PROMPT_2, MAX_TOKENS)
+            LlamaBridge.close(session)
+
             runOnUiThread {
                 runButton.isEnabled = true
-                output.text = report(r, rssBefore)
+                output.text = report(session, cold, warm, rssBefore)
             }
         }
     }
 
-    private fun report(r: LlamaBridge.Result, rssBeforeBytes: Long): String = buildString {
-        appendLine("FocusForge LLM smoke test — ${if (r.ok) "PASS" else "FAIL"}")
+    private fun report(
+        session: LlamaBridge.Session,
+        cold: LlamaBridge.Result,
+        warm: LlamaBridge.Result,
+        rssBeforeBytes: Long,
+    ): String = buildString {
+        val pass = cold.ok && warm.ok
+        appendLine("FocusForge LLM smoke test — ${if (pass) "PASS" else "FAIL"}")
         appendLine(LlamaBridge.buildInfo())
         appendLine("threads=$THREADS  n_ctx=$N_CTX  max_tokens=$MAX_TOKENS  mmap=yes")
-        appendLine("prompt=${r.promptTokens} tokens  chat template=${if (r.usedChatTemplate) "applied" else "NOT APPLIED"}")
+        appendLine("model ${modelFile.name}  %.0f MB".format(Locale.US, modelFile.length() / 1e6))
         appendLine()
-        if (!r.ok) {
-            appendLine("ERROR: ${r.error}")
+
+        appendLine("MODEL LOAD (once per session, not per message)")
+        appendLine("  %d ms".format(session.loadMs))
+        appendLine()
+
+        for ((label, r) in listOf("RUN 1 (cold)" to cold, "RUN 2 (warm)" to warm)) {
+            appendLine(label)
+            if (!r.ok) {
+                appendLine("  ERROR: ${r.error}")
+                appendLine("  first token id ${r.firstTokenId}" +
+                    if (r.firstWasEndOfGeneration) " (end-of-generation)" else "")
+            } else {
+                appendLine("  TTFT      %d ms   (model resident — no disk in this number)"
+                    .format(r.ttftMs))
+                appendLine("  decode    %.1f tok/s   (%d tokens in %d ms)"
+                    .format(Locale.US, r.tokensPerSecond, r.tokens, r.decodeMs))
+                appendLine("  prompt    %d tokens, chat template %s"
+                    .format(r.promptTokens, if (r.usedChatTemplate) "applied" else "NOT APPLIED"))
+                appendLine("  text: ${r.text.trim().take(120)}")
+            }
             appendLine()
-            appendLine("first sampled token id: ${r.firstTokenId}" +
-                if (r.firstWasEndOfGeneration) "  (end-of-generation)" else "")
-            appendLine()
-            appendLine("Note: reaching this screen at all means the native library")
-            appendLine("loaded and ran — so this is NOT the illegal-instruction failure")
-            appendLine("we were worried about. That risk is retired.")
-            return@buildString
         }
-        appendLine("--- generated text ---")
-        appendLine(r.text.trim())
-        appendLine("----------------------")
-        appendLine()
-        appendLine("TTFT        %d ms".format(r.ttftMs))
-        appendLine("decode      %.2f tok/s   (%d tokens in %d ms total)"
-            .format(Locale.US, r.tokensPerSecond, r.tokens, r.totalMs))
-        appendLine()
-        appendLine("RSS before load   %.0f MB".format(Locale.US, rssBeforeBytes / 1e6))
-        appendLine("RSS after load    %.0f MB".format(Locale.US, r.rssAfterLoadBytes / 1e6))
-        appendLine("RSS after gen     %.0f MB".format(Locale.US, r.rssAfterGenBytes / 1e6))
-        appendLine()
-        val peakMb = maxOf(r.rssAfterLoadBytes, r.rssAfterGenBytes) / 1e6
+
+        appendLine("MEMORY")
+        appendLine("  before open   %.0f MB".format(Locale.US, rssBeforeBytes / 1e6))
+        appendLine("  after load    %.0f MB".format(Locale.US, session.rssAfterLoadBytes / 1e6))
+        appendLine("  after gen     %.0f MB".format(Locale.US, warm.rssAfterGenBytes / 1e6))
+        val peakMb = maxOf(session.rssAfterLoadBytes, warm.rssAfterGenBytes) / 1e6
         if (peakMb > RSS_BUDGET_MB) {
-            appendLine("!! RSS %.0f MB EXCEEDS the %.0f MB budget (CLAUDE.md §2)."
+            appendLine("  !! %.0f MB EXCEEDS the %.0f MB budget (CLAUDE.md 2)."
                 .format(Locale.US, peakMb, RSS_BUDGET_MB))
-            appendLine("!! Report this before anything else is built on top.")
+            appendLine("  !! Report this before anything is built on top.")
         } else {
-            appendLine("RSS is within the %.0f MB budget.".format(Locale.US, RSS_BUDGET_MB))
+            appendLine("  within the %.0f MB budget (peak %.0f MB)"
+                .format(Locale.US, RSS_BUDGET_MB, peakMb))
         }
         appendLine()
-        appendLine("Targets for reference: TTFT <= 3000 ms, decode >= 5 tok/s.")
-        appendLine("Report these numbers to the architect whatever they are.")
+        appendLine("Contract targets: TTFT <= 3000 ms, decode >= 5 tok/s.")
+        appendLine("Send this whole block to the architect, whatever it says.")
     }
 
     private fun toast(m: String) = Toast.makeText(this, m, Toast.LENGTH_LONG).show()
@@ -219,6 +238,9 @@ class LlmSmokeActivity : Activity() {
 
         /** Short and neutral: this measures the silicon, not the prompt. */
         const val PROMPT = "Give one short, encouraging tip for staying focused while studying."
+
+        /** A second, different prompt so run 2 cannot be answered from a cached anything. */
+        const val PROMPT_2 = "Give one short tip for resting your eyes during a long study session."
 
         // The A20e has 2x A73 + 6x A53. Two threads is the documented starting point
         // (CLAUDE.md §5); the Phase 6 governor will replace this constant with a measured

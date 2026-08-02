@@ -3,13 +3,14 @@
 // DESIGN CONSTRAINT (architect, 2026-08-02 amendment 4): every knob the Phase 6
 // governor will want to turn — thread count, CPU affinity, n_ctx — is a RUNTIME
 // ARGUMENT here, never a compile-time constant. The governor is going to drive this
-// interface to benchmark each CPU cluster and then re-tune mid-session; anything
-// baked in at build time would have to be torn out again a week from now.
+// interface to benchmark each CPU cluster and then re-tune mid-session.
 //
-// Everything is measured, nothing is estimated: TTFT is the wall clock from the
-// start of the call to the first sampled token, and RSS is read from
-// /proc/self/statm at the moments the architect asked for (after load, after first
-// generation).
+// The model is held open across generations. The first version of this file loaded,
+// generated and freed in one call, which made the reported "TTFT" include mapping a
+// 386 MB file off flash — 3149 ms on the A20e, of which the overwhelming majority was
+// disk. A coach that reloaded the model for every message would also be unusable, and
+// a 60-second self-benchmark that reloaded per configuration could not fit in 60
+// seconds. So: load once, generate many, and time the two separately.
 
 #include <jni.h>
 #include <android/log.h>
@@ -29,6 +30,8 @@
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, TAG, __VA_ARGS__)
 
 namespace {
+
+constexpr char SEP = '\x1f';
 
 // Resident set size in bytes, straight from the kernel. The 700 MB budget in
 // CLAUDE.md §2 is written against VmRSS, so that is what we report — not Java heap,
@@ -60,136 +63,199 @@ void ensure_backend() {
     }
 }
 
-// One generation run, start to finish. Deliberately stateless: load, generate,
-// free. The smoke test needs to prove the whole path works on this silicon, and a
-// cached model would hide a load-time failure behind a warm run.
-struct RunResult {
-    bool ok = false;
-    std::string text;
-    std::string error;
-    long ttft_ms = -1;
-    long total_ms = -1;
-    int tokens = 0;
+/** An open model plus its context. Owned by Kotlin through an opaque handle. */
+struct Session {
+    llama_model*   model = nullptr;
+    llama_context* ctx   = nullptr;
+    const llama_vocab* vocab = nullptr;
+    int  n_ctx   = 0;
+    int  threads = 0;
+    long load_ms = -1;
     long rss_after_load = -1;
-    long rss_after_gen = -1;
-    // Diagnostics. The first attempt at this returned a bare "no tokens generated",
-    // which cost an operator round trip to learn nothing. Every subsequent failure
-    // should be diagnosable from the screen alone.
-    int n_prompt_tokens = 0;
-    int first_token_id = -1;
-    bool first_was_eog = false;
-    int decode_rc = 0;
-    bool used_chat_template = false;
 };
 
-RunResult run_generation(const char* model_path, const char* prompt, int n_threads,
-                         int n_ctx, int max_tokens) {
-    RunResult r;
-    ensure_backend();
+std::string pack(std::initializer_list<std::string> fields) {
+    std::string out;
+    bool first = true;
+    for (const auto& f : fields) {
+        if (!first) out += SEP;
+        out += f;
+        first = false;
+    }
+    return out;
+}
 
-    const long t_start = now_ms();
+/**
+ * Formats a prompt with the model's own chat template.
+ *
+ * Not cosmetic. SmolLM2-360M-**Instruct** is trained on ChatML, so a bare sentence looks
+ * like the middle of a document with no assistant turn to complete — and the first token
+ * it predicts is end-of-generation. That produced a "no tokens generated" failure on the
+ * A20e on 2026-08-02 while every layer underneath was working correctly.
+ */
+std::string apply_template(llama_model* model, const char* prompt, bool* used) {
+    *used = false;
+    const char* tmpl = llama_model_chat_template(model, nullptr);
+    if (tmpl == nullptr) return prompt;
+
+    llama_chat_message msg{"user", prompt};
+    std::vector<char> buf(std::strlen(prompt) + 2048);
+    int n = llama_chat_apply_template(tmpl, &msg, 1, /*add_assistant=*/true,
+                                      buf.data(), (int32_t) buf.size());
+    if (n > (int) buf.size()) {
+        buf.resize(n);
+        n = llama_chat_apply_template(tmpl, &msg, 1, true, buf.data(), (int32_t) buf.size());
+    }
+    if (n <= 0) return prompt;
+    *used = true;
+    return std::string(buf.data(), n);
+}
+
+}  // namespace
+
+extern "C" {
+
+/**
+ * Opens a model. Returns: ok | error | handle | loadMs | rssAfterLoad
+ *
+ * `threads` and `nCtx` are per-session because llama.cpp fixes them at context creation:
+ * the governor changing thread placement means opening a new session, which is why load
+ * time is measured and reported rather than assumed to be free.
+ */
+JNIEXPORT jstring JNICALL
+Java_com_focusforge_LlamaBridge_nativeLoad(JNIEnv* env, jobject /*thiz*/,
+                                           jstring j_path, jint threads, jint n_ctx) {
+    ensure_backend();
+    const char* path = env->GetStringUTFChars(j_path, nullptr);
+
+    const long t0 = now_ms();
 
     llama_model_params mparams = llama_model_default_params();
-    mparams.n_gpu_layers = 0;                       // CPU only: no usable GPU backend here
-    mparams.load_mode    = LLAMA_LOAD_MODE_MMAP;    // amendment 2: mmap, not a full read
+    mparams.n_gpu_layers = 0;                     // CPU only: no usable GPU backend here
+    mparams.load_mode    = LLAMA_LOAD_MODE_MMAP;  // amendment 2: mmap, not a full read
 
-    llama_model* model = llama_model_load_from_file(model_path, mparams);
+    llama_model* model = llama_model_load_from_file(path, mparams);
+    env->ReleaseStringUTFChars(j_path, path);
+
     if (!model) {
-        r.error = "llama_model_load_from_file returned null (bad path or corrupt GGUF?)";
-        return r;
+        return env->NewStringUTF(
+            pack({"0", "llama_model_load_from_file returned null (bad path or corrupt GGUF?)",
+                  "0", "-1", "-1"}).c_str());
     }
-    r.rss_after_load = rss_bytes();
-    LOGI("model loaded, RSS = %ld bytes", r.rss_after_load);
 
     llama_context_params cparams = llama_context_default_params();
     cparams.n_ctx           = (uint32_t) n_ctx;
     cparams.n_batch         = (uint32_t) n_ctx;
-    cparams.n_threads       = n_threads;
-    cparams.n_threads_batch = n_threads;
+    cparams.n_threads       = threads;
+    cparams.n_threads_batch = threads;
 
     llama_context* ctx = llama_init_from_model(model, cparams);
     if (!ctx) {
         llama_model_free(model);
-        r.error = "llama_init_from_model returned null";
-        return r;
+        return env->NewStringUTF(
+            pack({"0", "llama_init_from_model returned null", "0", "-1", "-1"}).c_str());
     }
 
-    const llama_vocab* vocab = llama_model_get_vocab(model);
+    Session* s = new Session();
+    s->model   = model;
+    s->ctx     = ctx;
+    s->vocab   = llama_model_get_vocab(model);
+    s->n_ctx   = n_ctx;
+    s->threads = threads;
+    s->load_ms = now_ms() - t0;
+    s->rss_after_load = rss_bytes();
 
-    // Apply the model's own chat template.
-    //
-    // This is not cosmetic. SmolLM2-360M-**Instruct** was trained on ChatML, so a bare
-    // sentence looks like the middle of a document with no assistant turn to complete —
-    // and the very first token it predicts is end-of-text. Greedy sampling then takes it,
-    // the loop breaks before counting anything, and the run reports zero tokens while
-    // every layer underneath worked perfectly. That is exactly what happened on the first
-    // on-device attempt (2026-08-02).
-    std::string formatted = prompt;
-    const char* tmpl = llama_model_chat_template(model, nullptr);
-    if (tmpl != nullptr) {
-        llama_chat_message msg{"user", prompt};
-        std::vector<char> buf(std::strlen(prompt) + 2048);
-        int n = llama_chat_apply_template(tmpl, &msg, 1, /*add_assistant=*/true,
-                                          buf.data(), (int32_t) buf.size());
-        if (n > (int) buf.size()) {
-            buf.resize(n);
-            n = llama_chat_apply_template(tmpl, &msg, 1, true, buf.data(), (int32_t) buf.size());
-        }
-        if (n > 0) {
-            formatted.assign(buf.data(), n);
-            r.used_chat_template = true;
-        }
+    LOGI("model loaded in %ld ms, RSS = %ld bytes", s->load_ms, s->rss_after_load);
+    return env->NewStringUTF(
+        pack({"1", "", std::to_string((jlong) (intptr_t) s),
+              std::to_string(s->load_ms), std::to_string(s->rss_after_load)}).c_str());
+}
+
+/**
+ * Generates from an already-open session. Returns:
+ *   ok | error | text | ttftMs | decodeMs | tokens | rssAfterGen
+ *   | promptTokens | firstTokenId | firstWasEog | usedChatTemplate
+ *
+ * TTFT here is what the performance contract means by TTFT: the model is resident, so it
+ * is prompt processing plus one token, with no disk in the path.
+ */
+JNIEXPORT jstring JNICALL
+Java_com_focusforge_LlamaBridge_nativeGenerate(JNIEnv* env, jobject /*thiz*/, jlong handle,
+                                               jstring j_prompt, jint max_tokens) {
+    Session* s = (Session*) (intptr_t) handle;
+    if (s == nullptr || s->ctx == nullptr) {
+        return env->NewStringUTF(
+            pack({"0", "no open model session", "", "-1", "-1", "0", "-1",
+                  "0", "-1", "0", "0"}).c_str());
     }
-    const char* text_in = formatted.c_str();
 
-    // Tokenize. Ask for the size first rather than guessing a buffer.
-    const int n_prompt = -llama_tokenize(vocab, text_in, (int32_t) std::strlen(text_in),
-                                         nullptr, 0, true, true);
+    const char* prompt = env->GetStringUTFChars(j_prompt, nullptr);
+    bool used_template = false;
+    const std::string formatted = apply_template(s->model, prompt, &used_template);
+    env->ReleaseStringUTFChars(j_prompt, prompt);
+
+    // Each generation starts from a clean slate: the smoke test and the governor's probe
+    // both want repeatable numbers, and leftover KV state would make run 2 cheaper than
+    // run 1 for reasons that have nothing to do with the silicon.
+    llama_memory_clear(llama_get_memory(s->ctx), true);
+
+    const long t_start = now_ms();
+
+    const int n_prompt = -llama_tokenize(s->vocab, formatted.c_str(),
+                                         (int32_t) formatted.size(), nullptr, 0, true, true);
+    if (n_prompt <= 0 || n_prompt >= s->n_ctx) {
+        return env->NewStringUTF(
+            pack({"0",
+                  "prompt is " + std::to_string(n_prompt) + " tokens against n_ctx " +
+                      std::to_string(s->n_ctx),
+                  "", "-1", "-1", "0", std::to_string(rss_bytes()),
+                  std::to_string(n_prompt), "-1", "0", used_template ? "1" : "0"}).c_str());
+    }
     std::vector<llama_token> tokens(n_prompt);
-    r.n_prompt_tokens = n_prompt;
-    if (llama_tokenize(vocab, text_in, (int32_t) std::strlen(text_in), tokens.data(),
-                       (int32_t) tokens.size(), true, true) < 0) {
-        llama_free(ctx);
-        llama_model_free(model);
-        r.error = "tokenization failed";
-        return r;
+    if (llama_tokenize(s->vocab, formatted.c_str(), (int32_t) formatted.size(),
+                       tokens.data(), (int32_t) tokens.size(), true, true) < 0) {
+        return env->NewStringUTF(
+            pack({"0", "tokenization failed", "", "-1", "-1", "0", std::to_string(rss_bytes()),
+                  std::to_string(n_prompt), "-1", "0", used_template ? "1" : "0"}).c_str());
     }
 
     llama_sampler* smpl = llama_sampler_chain_init(llama_sampler_chain_default_params());
-    // Greedy: the smoke test asks "does this silicon execute the kernels", and a
-    // deterministic sampler makes two runs comparable. The coach will use a real
-    // sampler chain later.
+    // Greedy: a deterministic sampler makes two runs comparable, which is what both the
+    // smoke test and the governor's throughput probe need. The coach uses its own chain.
     llama_sampler_chain_add(smpl, llama_sampler_init_greedy());
 
     llama_batch batch = llama_batch_get_one(tokens.data(), (int32_t) tokens.size());
 
     std::string out;
-    long ttft = -1;
+    std::string error;
+    long ttft_ms = -1;
+    long t_first = 0;
     int generated = 0;
+    int first_id = -1;
+    bool first_was_eog = false;
 
-    // llama_batch_get_one BORROWS this pointer — it must outlive the decode call that
-    // consumes it, so it lives out here rather than inside the loop body.
+    // llama_batch_get_one BORROWS this pointer — it must outlive the decode that consumes it.
     llama_token next_token = 0;
 
-    for (int pos = 0; pos + batch.n_tokens < n_ctx && generated < max_tokens; ) {
-        const int rc = llama_decode(ctx, batch);
+    for (int pos = 0; pos + batch.n_tokens < s->n_ctx && generated < max_tokens; ) {
+        const int rc = llama_decode(s->ctx, batch);
         if (rc != 0) {
-            r.decode_rc = rc;
-            r.error = "llama_decode failed with code " + std::to_string(rc);
+            error = "llama_decode failed with code " + std::to_string(rc);
             break;
         }
         pos += batch.n_tokens;
 
-        llama_token id = llama_sampler_sample(smpl, ctx, -1);
-        if (ttft < 0) {
-            ttft = now_ms() - t_start;   // first token out of the model
-            r.first_token_id = id;
-            r.first_was_eog = llama_vocab_is_eog(vocab, id);
+        const llama_token id = llama_sampler_sample(smpl, s->ctx, -1);
+        if (ttft_ms < 0) {
+            t_first = now_ms();
+            ttft_ms = t_first - t_start;
+            first_id = id;
+            first_was_eog = llama_vocab_is_eog(s->vocab, id);
         }
-        if (llama_vocab_is_eog(vocab, id)) break;
+        if (llama_vocab_is_eog(s->vocab, id)) break;
 
         char buf[256];
-        const int n = llama_token_to_piece(vocab, id, buf, sizeof(buf), 0, true);
+        const int n = llama_token_to_piece(s->vocab, id, buf, sizeof(buf), 0, true);
         if (n > 0) out.append(buf, n);
         generated++;
 
@@ -197,68 +263,40 @@ RunResult run_generation(const char* model_path, const char* prompt, int n_threa
         batch = llama_batch_get_one(&next_token, 1);
     }
 
-    r.rss_after_gen = rss_bytes();
-    r.total_ms = now_ms() - t_start;
-    r.ttft_ms = ttft;
-    r.tokens = generated;
-    r.text = out;
-    r.ok = r.error.empty() && generated > 0;
-    if (!r.ok && r.error.empty()) {
-        if (r.first_was_eog) {
-            r.error = "the model's FIRST token was end-of-generation (id " +
-                      std::to_string(r.first_token_id) + "). The pipeline ran correctly; " +
-                      "the model simply had nothing to say to this prompt. Chat template " +
-                      std::string(r.used_chat_template ? "WAS" : "was NOT") + " applied.";
-        } else if (n_prompt >= n_ctx) {
-            r.error = "prompt is " + std::to_string(n_prompt) + " tokens but n_ctx is " +
-                      std::to_string(n_ctx) + " — nothing left to generate into";
+    // Decode time excludes prompt processing, so tok/s describes generation speed rather
+    // than being diluted by however long the prompt happened to be.
+    const long decode_ms = (ttft_ms < 0) ? -1 : (now_ms() - t_first);
+    const long rss_after = rss_bytes();
+
+    llama_sampler_free(smpl);
+
+    const bool ok = error.empty() && generated > 0;
+    if (!ok && error.empty()) {
+        if (first_was_eog) {
+            error = "the model's FIRST token was end-of-generation (id " +
+                    std::to_string(first_id) + "). The pipeline ran correctly; the model " +
+                    "had nothing to say to this prompt. Chat template " +
+                    std::string(used_template ? "WAS" : "was NOT") + " applied.";
         } else {
-            r.error = "no tokens generated (prompt " + std::to_string(n_prompt) +
-                      " tokens, first id " + std::to_string(r.first_token_id) + ")";
+            error = "no tokens generated (prompt " + std::to_string(n_prompt) +
+                    " tokens, first id " + std::to_string(first_id) + ")";
         }
     }
 
-    llama_sampler_free(smpl);
-    llama_free(ctx);
-    llama_model_free(model);
-    return r;
+    return env->NewStringUTF(
+        pack({ok ? "1" : "0", error, out, std::to_string(ttft_ms), std::to_string(decode_ms),
+              std::to_string(generated), std::to_string(rss_after),
+              std::to_string(n_prompt), std::to_string(first_id),
+              first_was_eog ? "1" : "0", used_template ? "1" : "0"}).c_str());
 }
 
-}  // namespace
-
-extern "C" {
-
-// Returns a single '\x1f'-separated record so the smoke test needs no JSON parser:
-//   ok | error | text | ttftMs | totalMs | tokens | rssAfterLoad | rssAfterGen
-//   | nPromptTokens | firstTokenId | firstWasEog | usedChatTemplate
-JNIEXPORT jstring JNICALL
-Java_com_focusforge_LlamaBridge_nativeGenerate(JNIEnv* env, jobject /*thiz*/,
-                                               jstring j_model_path, jstring j_prompt,
-                                               jint n_threads, jint n_ctx, jint max_tokens) {
-    const char* model_path = env->GetStringUTFChars(j_model_path, nullptr);
-    const char* prompt     = env->GetStringUTFChars(j_prompt, nullptr);
-
-    RunResult r = run_generation(model_path, prompt, n_threads, n_ctx, max_tokens);
-
-    env->ReleaseStringUTFChars(j_model_path, model_path);
-    env->ReleaseStringUTFChars(j_prompt, prompt);
-
-    char sep = '\x1f';
-    std::string packed;
-    packed += (r.ok ? "1" : "0");            packed += sep;
-    packed += r.error;                       packed += sep;
-    packed += r.text;                        packed += sep;
-    packed += std::to_string(r.ttft_ms);     packed += sep;
-    packed += std::to_string(r.total_ms);    packed += sep;
-    packed += std::to_string(r.tokens);      packed += sep;
-    packed += std::to_string(r.rss_after_load); packed += sep;
-    packed += std::to_string(r.rss_after_gen);   packed += sep;
-    packed += std::to_string(r.n_prompt_tokens); packed += sep;
-    packed += std::to_string(r.first_token_id);  packed += sep;
-    packed += (r.first_was_eog ? "1" : "0");     packed += sep;
-    packed += (r.used_chat_template ? "1" : "0");
-
-    return env->NewStringUTF(packed.c_str());
+JNIEXPORT void JNICALL
+Java_com_focusforge_LlamaBridge_nativeFree(JNIEnv* /*env*/, jobject /*thiz*/, jlong handle) {
+    Session* s = (Session*) (intptr_t) handle;
+    if (s == nullptr) return;
+    if (s->ctx)   llama_free(s->ctx);
+    if (s->model) llama_model_free(s->model);
+    delete s;
 }
 
 // The build-time guarantee, readable at runtime. If this ever reports a feature the
