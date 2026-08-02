@@ -32,6 +32,8 @@ DEVICE_FILE=".device"
 # automatically. A phone's screenshot folder contains the operator's whole life, and the
 # app's own Session screen shows their face — deciding what becomes public is theirs.
 SHOT_STAGING="docs/screenshots/incoming"
+# Only screenshots this recent are touched at all — see the note where they are pulled.
+SHOT_DAYS="${SHOT_DAYS:-3}"
 
 setup_help() {
     cat <<'EOF'
@@ -129,12 +131,19 @@ echo "Pulling derived data (numbers only — no image data is produced by the ap
 pull_dir "$REMOTE/sessions" "bench/sessions"  "session exports"
 pull_dir "$REMOTE/replays"  "bench/replays"   "landmark recordings"
 
-# Screenshots: staged, never auto-committed. See the comment at the top of this file.
+# Screenshots: staged, never auto-committed, and only ones taken in the last few days.
+#
+# The first version pulled the twelve most recent screenshots and came back with the
+# operator's Discord, Gmail and Maps. They were gitignored and never at risk of being
+# published, but copying somebody's private screenshots onto another machine is not
+# something to do as a side effect of fetching benchmark data. A time window keeps this to
+# things plausibly taken for the project, and even those are the operator's to hand over.
 mkdir -p "$SHOT_STAGING"
 echo
-echo "Staging recent screenshots into $SHOT_STAGING (NOT committed — you choose):"
-SHOTS="$("$ADB" -s "$ADDR" shell 'ls -t /sdcard/Pictures/Screenshots /sdcard/DCIM/Screenshots 2>/dev/null' \
-    | tr -d '\r' | grep -iE '\.(png|jpg)$' | head -12 || true)"
+echo "Staging screenshots from the last $SHOT_DAYS days into $SHOT_STAGING (NOT committed):"
+SHOTS="$("$ADB" -s "$ADDR" shell "find /sdcard/Pictures/Screenshots /sdcard/DCIM/Screenshots \
+    -maxdepth 1 -type f -mtime -$SHOT_DAYS 2>/dev/null" \
+    | tr -d '\r' | grep -iE '\.(png|jpg)$' | xargs -r -n1 basename || true)"
 if [ -z "$SHOTS" ]; then
     echo "  none found"
 else

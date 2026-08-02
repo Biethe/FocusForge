@@ -50,17 +50,28 @@ data class ContractCheck(
     val satisfied: Boolean,
     /** True when the term is present but deliberately unenforced (a null limit). */
     val recordedOnly: Boolean,
+    /**
+     * The same thing in words — **stored, not computed**, so that it survives into the
+     * session export.
+     *
+     * These files are read by people as well as by code. "ttftMs = 9727 VIOLATES 3000" tells
+     * a reviewer in one line what four separate numeric fields make them assemble in their
+     * head, and the decision log is only useful if it can be audited by reading it.
+     */
+    val summary: String = "",
 ) {
-    val summary: String
-        get() = when {
+    companion object {
+        fun describe(term: String, limit: Double?, measured: Double?,
+                     satisfied: Boolean, recordedOnly: Boolean): String = when {
             recordedOnly -> "$term = ${fmt(measured)} (recorded, not enforced)"
             satisfied -> "$term = ${fmt(measured)} within ${fmt(limit)}"
             else -> "$term = ${fmt(measured)} VIOLATES ${fmt(limit)}"
         }
 
-    private fun fmt(v: Double?): String =
-        if (v == null) "n/a" else if (v == v.toLong().toDouble()) v.toLong().toString()
-        else String.format("%.2f", v)
+        private fun fmt(v: Double?): String =
+            if (v == null) "n/a" else if (v == v.toLong().toDouble()) v.toLong().toString()
+            else String.format("%.2f", v)
+    }
 }
 
 /** Everything measured in one governor window, ready to be checked against the contract. */
@@ -106,9 +117,11 @@ object ContractChecker {
     ): ContractCheck? {
         if (measured == null) return null          // not measured this window; say nothing
         if (limit == null) {
-            return ContractCheck(name, null, measured, satisfied = true, recordedOnly = true)
+            return ContractCheck(name, null, measured, satisfied = true, recordedOnly = true,
+                summary = ContractCheck.describe(name, null, measured, true, true))
         }
         val ok = if (lowerIsBetter) measured <= limit else measured >= limit
-        return ContractCheck(name, limit, measured, satisfied = ok, recordedOnly = false)
+        return ContractCheck(name, limit, measured, satisfied = ok, recordedOnly = false,
+            summary = ContractCheck.describe(name, limit, measured, ok, false))
     }
 }

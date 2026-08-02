@@ -1011,3 +1011,52 @@ rather than a per-minute figure, and the `+` is not decoration — the count is 
 None of this touches the focus score or the fatigue flag, which never read blink rate
 (§15.8). PERCLOS and long closures are unaffected by frame rate in the same way, because
 they are time-weighted measures of states rather than counts of events (§8).
+
+---
+
+## 17. Eight recordings instead of three (2026-08-02)
+
+§14.2 named the weakest thing about this project — *"n = 1 person, 1 session per state"* — and
+§14.3 listed *"repeat recordings on different days"* as the cheapest way to improve it. The
+operator has since produced more, and automatic device sync surfaced sessions that had never
+been sent by hand. There are now **three focused, two distracted and three drowsy**.
+
+Every one of them, through the current pipeline:
+
+| label | file | PERCLOS | gaze | long closures | score | fatigue |
+|---|---|---|---|---|---|---|
+| focused | ...132725 | 0.000 | 0.991 | 0 | 96.7 | no |
+| focused | ...133556 | 0.000 | 0.979 | 0 | 96.7 | no |
+| focused | ...184547 | 0.000 | 0.994 | 1 | 96.6 | no |
+| distracted | ...132923 | 0.001 | 0.564 | 0 | 66.9 | no |
+| distracted | ...133855 | 0.003 | 0.604 | 2 | 75.3 | no |
+| drowsy | ...134140 | 0.090 | 0.750 | 12 | 64.4 | **yes** |
+| drowsy | ...010231 | **0.000** | 0.946 | 5 | 89.5 | **yes** |
+| drowsy | ...010441 | 0.093 | 0.719 | 10 | 46.5 | **yes** |
+
+### What now holds across *all* of them
+
+Asserted in CI by `AllRecordingsOrderingTest`, which compares the **worst** recording of one
+label against the **best** of another — so no single flattering session can carry a claim:
+
+- **The focus score separates focused from everything else.** Worst focused 96.6 against best
+  other 89.5.
+- **The score is reproducible**: three separate sessions of the same behaviour scored 96.7,
+  96.7 and 96.6, a spread of 0.1 points.
+- **The fatigue flag fires on all three drowsy sessions and on none of the other five.**
+- **Gaze separates focused from distracted**: worst 0.979 against best 0.604.
+
+### The negative result, which is the more useful half
+
+**PERCLOS alone does not separate every drowsy session.** The 010231 recording measures
+PERCLOS **0.000** — identical to a focused session — while being unmistakably drowsy by long
+closures (5 against 0) and raising the fatigue flag throughout.
+
+Had the fusion rested on PERCLOS, that session would have read as perfectly alert. It is the
+strongest evidence yet for the multi-signal design in §15.8, and **it only became visible
+because there was more than one recording per label**. With the single drowsy recording we had
+before, PERCLOS looked like a reliable discriminator.
+
+This is kept as a test that asserts the *limitation* rather than being quietly dropped: if a
+future change makes PERCLOS separate every pair, that test fails and tells whoever made it to
+come and update this section.

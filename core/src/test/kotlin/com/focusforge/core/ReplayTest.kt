@@ -334,3 +334,116 @@ class RecordedFocusScoreTest {
         assertFalse(x.everFatigued, "the distracted session raised the fatigue flag")
     }
 }
+
+/**
+ * The orderings across **every** committed recording, not just one per label.
+ *
+ * §14.2 named "n = 1 person, 1 session per state" as the weakest thing about this project and
+ * "repeat recordings on different days" as the cheapest way to improve it. The operator has
+ * since produced three focused, two distracted and three drowsy sessions, so the claims can
+ * now be tested against all of them rather than against whichever file sorts first.
+ *
+ * This is a genuinely harder test: the *worst* recording of one label must beat the *best* of
+ * another. One flattering session can no longer carry an assertion.
+ */
+class AllRecordingsOrderingTest {
+
+    private val replayDir = File(System.getProperty("focusforge.replayDir") ?: "bench/replays")
+
+    private class Scored(val name: String, val signals: CumulativeSignals, val meanScore: Double,
+                         val everFatigued: Boolean)
+
+    private fun load(label: String): List<Scored> =
+        (replayDir.listFiles() ?: emptyArray())
+            .filter { it.isFile && it.name.startsWith("$label-") && it.name.endsWith(".json") }
+            .sortedBy { it.name }
+            .map { file ->
+                val recording = ReplayJson.decode(file.readText())
+                val engine = SignalEngine()
+                val scorer = FocusScorer()
+                var fatigued = false
+                recording.samples().forEach {
+                    if (scorer.update(engine.update(it)).fatigue) fatigued = true
+                }
+                val signals = engine.cumulative()
+                Scored(file.name, signals, scorer.summary(signals).meanScore, fatigued)
+            }
+
+    private fun require(vararg labels: String): Map<String, List<Scored>> {
+        val loaded = labels.associateWith { load(it) }
+        Assumptions.assumeTrue(
+            loaded.values.all { it.isNotEmpty() },
+            "NOT MEASURED YET — recordings missing from ${replayDir.absolutePath}",
+        )
+        return loaded
+    }
+
+    @Test
+    fun `the focus score separates every focused session from every other one`() {
+        val all = require("focused", "distracted", "drowsy")
+        val focused = all.getValue("focused")
+        val others = all.getValue("distracted") + all.getValue("drowsy")
+
+        val worstFocused = focused.minBy { it.meanScore }
+        val bestOther = others.maxBy { it.meanScore }
+        assertTrue(
+            worstFocused.meanScore > bestOther.meanScore,
+            "the weakest focused session (${worstFocused.name}, ${worstFocused.meanScore}) must " +
+                "still beat the strongest other (${bestOther.name}, ${bestOther.meanScore})",
+        )
+        // Reproducibility is the other half of the claim: three separate sessions of the same
+        // behaviour should not produce three different answers.
+        val spread = focused.maxOf { it.meanScore } - focused.minOf { it.meanScore }
+        assertTrue(spread < 5.0, "focused sessions scored ${focused.map { it.meanScore }} — spread $spread")
+    }
+
+    @Test
+    fun `the fatigue flag fires on every drowsy session and on no other`() {
+        val all = require("focused", "distracted", "drowsy")
+        for (s in all.getValue("drowsy")) {
+            assertTrue(s.everFatigued, "${s.name} was recorded as drowsy but never raised the flag")
+        }
+        for (s in all.getValue("focused") + all.getValue("distracted")) {
+            assertFalse(s.everFatigued, "${s.name} raised the fatigue flag but was not drowsy")
+        }
+    }
+
+    @Test
+    fun `gaze separates every focused session from every distracted one`() {
+        val all = require("focused", "distracted")
+        val worstFocused = all.getValue("focused").minBy { it.signals.gazeOnScreenFraction }
+        val bestDistracted = all.getValue("distracted").maxBy { it.signals.gazeOnScreenFraction }
+        assertTrue(
+            worstFocused.signals.gazeOnScreenFraction > bestDistracted.signals.gazeOnScreenFraction,
+            "${worstFocused.name} (${worstFocused.signals.gazeOnScreenFraction}) vs " +
+                "${bestDistracted.name} (${bestDistracted.signals.gazeOnScreenFraction})",
+        )
+    }
+
+    @Test
+    fun `PERCLOS alone does NOT separate every drowsy session, and this records that`() {
+        // A negative result, kept deliberately (CLAUDE.md §4.1).
+        //
+        // One of the three drowsy recordings measures PERCLOS 0.000 — identical to a focused
+        // session — while still being unmistakably drowsy by long closures (5 against 0). Had
+        // the fusion rested on PERCLOS alone, that session would have read as perfectly alert.
+        // It is the clearest evidence available for the multi-signal design in §15.8, and it
+        // only appeared because there was more than one recording per label.
+        val all = require("focused", "drowsy")
+        val drowsy = all.getValue("drowsy")
+        val worstDrowsyPerclos = drowsy.minOf { it.signals.perclos }
+        val worstFocusedPerclos = all.getValue("focused").maxOf { it.signals.perclos }
+
+        assertTrue(
+            worstDrowsyPerclos <= worstFocusedPerclos,
+            "a drowsy session now beats every focused one on PERCLOS alone — if that is " +
+                "genuinely true, this test and docs/SIGNALS.md §15.8 should be updated to say so",
+        )
+        // ...and the signal that does carry it must still be doing so.
+        assertTrue(
+            drowsy.all { it.signals.longClosureCount >= 5 },
+            "long closures are what rescue the PERCLOS-blind session: " +
+                "${drowsy.map { it.name to it.signals.longClosureCount }}",
+        )
+    }
+}
