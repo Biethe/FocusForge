@@ -94,8 +94,14 @@ data class CostModel(
                 if (points.isEmpty()) return@mapNotNull null
 
                 val distinctX = points.map { it.first }.distinct().size
-                val (slope, intercept) = if (distinctX >= 2) leastSquares(points) else {
-                    points.map { it.second / it.first }.average() to 0.0
+                val fitted = if (distinctX >= 2) leastSquares(points) else null
+                // A negative or zero cost per token is not a measurement — it is noise that
+                // happened to fit. Seen for real on a 16-core machine where the work finished
+                // inside the clock's resolution. Fall back to the plain mean ratio, which
+                // cannot go negative, rather than publishing an impossible constant.
+                val (slope, intercept) = when {
+                    fitted != null && fitted.first > 0.0 -> fitted
+                    else -> points.map { it.second / it.first }.average() to 0.0
                 }
                 val decode = group.mapNotNull { it.decodeTokPerSec }.takeIf { it.isNotEmpty() }
                     ?.average() ?: 0.0

@@ -1,0 +1,214 @@
+{
+    "schemaVersion": 1,
+    "device": {
+        "label": "samsung-galaxy-a20e",
+        "model": "Samsung Galaxy A20e (SM-A202F/DS), Exynos 7884B, 2x Cortex-A73 + 6x Cortex-A53, Armv8.0-A",
+        "workload": "llama.cpp + SmolLM2-360M-Instruct q8_0",
+        "workload_note": "Real language-model measurements on the physical device. Milliseconds here are per PROMPT TOKEN and are directly meaningful.",
+        "source": "a20e-threads-kvcache-20260802.json"
+    },
+    "generatedAtEpochMs": 1785700493199,
+    "topology": {
+        "coreCount": 8,
+        "clusters": [
+            {
+                "cores": [
+                    6,
+                    7
+                ],
+                "maxFreqKhz": 1560000
+            },
+            {
+                "cores": [
+                    0,
+                    1,
+                    2,
+                    3,
+                    4,
+                    5
+                ],
+                "maxFreqKhz": 1352000
+            }
+        ],
+        "features": "fp asimd aes pmull sha1 sha2 crc32",
+        "totalRamBytes": 2877292544
+    },
+    "contract": {
+        "ttftMsMax": 3000,
+        "decodeTokPerSecMin": 5.0,
+        "visionFpsMin": 5.0,
+        "rssBytesMax": 734003200,
+        "batteryPercentPerHourMax": null
+    },
+    "chosen": {
+        "threads": 4,
+        "nCtx": 512,
+        "affinity": null,
+        "visionFpsBudget": 8.0,
+        "modelFile": null,
+        "meetsContract": true
+    },
+    "reasons": [
+        {
+            "knob": "threads",
+            "value": "4",
+            "because": "cheapest configuration predicted to satisfy the contract: 2190 ms for a 83-token prompt (30 cached) against a limit of 3000 ms; prefill measured at 23.7 tok/s"
+        },
+        {
+            "knob": "affinity",
+            "value": "none",
+            "because": "thread pinning has not been implemented or measured; the scheduler places threads. Recorded as an explicit 'not measured' rather than an empty field"
+        },
+        {
+            "knob": "visionFpsBudget",
+            "value": "8.0",
+            "because": "contract floor 5.0 plus headroom; no sustain probe ran, so this is provisional and the governor will lower it if the contract slips"
+        },
+        {
+            "knob": "modelFile",
+            "value": "unchanged",
+            "because": "no model files were listed, so the host keeps what it has"
+        }
+    ],
+    "evidence": {
+        "topology": {
+            "coreCount": 8,
+            "clusters": [
+                {
+                    "cores": [
+                        6,
+                        7
+                    ],
+                    "maxFreqKhz": 1560000
+                },
+                {
+                    "cores": [
+                        0,
+                        1,
+                        2,
+                        3,
+                        4,
+                        5
+                    ],
+                    "maxFreqKhz": 1352000
+                }
+            ],
+            "features": "fp asimd aes pmull sha1 sha2 crc32",
+            "totalRamBytes": 2877292544
+        },
+        "runs": [
+            {
+                "threads": 2,
+                "affinity": null,
+                "promptTokens": 83,
+                "reusedTokens": 0,
+                "ttftMs": 4913,
+                "decodeTokPerSec": 12.3,
+                "rssBytes": null
+            },
+            {
+                "threads": 2,
+                "affinity": null,
+                "promptTokens": 77,
+                "reusedTokens": 30,
+                "ttftMs": 2784,
+                "decodeTokPerSec": 12.4,
+                "rssBytes": null
+            },
+            {
+                "threads": 2,
+                "affinity": null,
+                "promptTokens": 81,
+                "reusedTokens": 30,
+                "ttftMs": 3035,
+                "decodeTokPerSec": 12.4,
+                "rssBytes": null
+            },
+            {
+                "threads": 4,
+                "affinity": null,
+                "promptTokens": 83,
+                "reusedTokens": 0,
+                "ttftMs": 3458,
+                "decodeTokPerSec": 14.0,
+                "rssBytes": null
+            },
+            {
+                "threads": 4,
+                "affinity": null,
+                "promptTokens": 77,
+                "reusedTokens": 30,
+                "ttftMs": 1940,
+                "decodeTokPerSec": 14.1,
+                "rssBytes": null
+            },
+            {
+                "threads": 4,
+                "affinity": null,
+                "promptTokens": 81,
+                "reusedTokens": 30,
+                "ttftMs": 2102,
+                "decodeTokPerSec": 14.1,
+                "rssBytes": null
+            },
+            {
+                "threads": 6,
+                "affinity": null,
+                "promptTokens": 83,
+                "reusedTokens": 0,
+                "ttftMs": 2659,
+                "decodeTokPerSec": 17.1,
+                "rssBytes": null
+            },
+            {
+                "threads": 6,
+                "affinity": null,
+                "promptTokens": 77,
+                "reusedTokens": 30,
+                "ttftMs": 1481,
+                "decodeTokPerSec": 14.4,
+                "rssBytes": null
+            },
+            {
+                "threads": 6,
+                "affinity": null,
+                "promptTokens": 81,
+                "reusedTokens": 30,
+                "ttftMs": 1632,
+                "decodeTokPerSec": 16.8,
+                "rssBytes": null
+            }
+        ],
+        "costModel": {
+            "perThreadCount": [
+                {
+                    "threads": 2,
+                    "msPerFreshToken": 58.965753424657535,
+                    "interceptMs": 19.73287671232841,
+                    "decodeTokPerSec": 12.366666666666667
+                },
+                {
+                    "threads": 4,
+                    "msPerFreshToken": 42.24657534246575,
+                    "interceptMs": -48.8767123287671,
+                    "decodeTokPerSec": 14.066666666666668
+                },
+                {
+                    "threads": 6,
+                    "msPerFreshToken": 32.48116438356164,
+                    "interceptMs": -35.69691780821904,
+                    "decodeTokPerSec": 16.099999999999998
+                }
+            ]
+        },
+        "memory": null,
+        "thermal": null,
+        "durationMs": -1,
+        "budgetMs": -1,
+        "complete": true,
+        "notes": [
+            "Derived from a20e-threads-kvcache-20260802.json — measurements taken by the operator on the physical device with the real model, not re-run here.",
+            "No sustain probe: the committed benchmark did not include one."
+        ]
+    }
+}

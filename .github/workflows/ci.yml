@@ -178,6 +178,51 @@ jobs:
           fi
           echo "Only :core was built on this runner, as required."
 
+      # THE CROSS-SILICON EXHIBIT (Phase 6, item 4).
+      #
+      # The same discovery, self-benchmark, cost model and profile derivation that run on the
+      # operator's Armv8.0 phone, executed here on Neoverse-class Arm silicon. This is the
+      # entire reason :governor is pure Kotlin/JVM: the Android SDK is forbidden on this
+      # runner, so a single Android import would make this step impossible to write.
+      #
+      # It uses the reference CPU kernel rather than the language model — a 270 MB GGUF
+      # fetch does not belong inside a 60-second benchmark — and the profile it writes says
+      # so in its own device block.
+      - name: Derive this Arm runner's device profile
+        run: |
+          ./gradlew -PcoreOnly :governor:deriveProfile --no-daemon \
+            -PprofileOut="$PWD/bench/profiles/ci-arm64.device.profile.json" \
+            -PprofileLabel="github-ubuntu-24.04-arm" \
+            -PprofileBudgetMs=60000
+
+      - name: Show the two profiles side by side
+        run: |
+          python3 - <<'PY'
+          import json, glob
+          for path in sorted(glob.glob("bench/profiles/*.device.profile.json")):
+              p = json.load(open(path))
+              t, c = p["topology"], p["chosen"]
+              print(f"\n=== {p['device'].get('label', path)}")
+              print(f"  workload   {p['device'].get('workload')}")
+              print(f"  cores      {t['coreCount']} in {len(t['clusters'])} cluster(s)")
+              for cl in t["clusters"]:
+                  print(f"    cpu{cl['cores'][0]}-{cl['cores'][-1]} @ {cl['maxFreqKhz']}")
+              feats = (t.get("features") or "")
+              for f in ("asimddp", "i8mm", "sve", "sve2"):
+                  print(f"    {f:<8} {'yes' if f in feats.split() else 'no'}")
+              print(f"  chosen     {c['threads']} threads, vision {c['visionFpsBudget']} fps, "
+                    f"meetsContract={c['meetsContract']}")
+              for r in p["reasons"]:
+                  if r["knob"] == "threads":
+                      print(f"    because  {r['because']}")
+          PY
+
+      - name: Upload the device profiles
+        uses: actions/upload-artifact@v4
+        with:
+          name: device-profiles
+          path: bench/profiles/
+
       - name: Upload test report
         if: always()
         uses: actions/upload-artifact@v4
