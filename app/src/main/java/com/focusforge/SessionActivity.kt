@@ -20,6 +20,8 @@ import androidx.activity.ComponentActivity
 import androidx.camera.view.PreviewView
 import androidx.core.content.ContextCompat
 import com.focusforge.core.BlinkRateValidity
+import com.focusforge.core.CoachLanguage
+import com.focusforge.core.CoachMessage
 import com.focusforge.core.FaceSample
 import com.focusforge.core.FocusScorer
 import com.focusforge.core.FocusState
@@ -51,6 +53,8 @@ class SessionActivity : ComponentActivity() {
     private lateinit var elapsedText: TextView
     private lateinit var summaryText: TextView
     private lateinit var exportButton: Button
+    private lateinit var coachText: TextView
+    private lateinit var languageButton: Button
 
     private val perf = PerfMonitor()
     private val uiHandler = Handler(Looper.getMainLooper())
@@ -76,6 +80,12 @@ class SessionActivity : ComponentActivity() {
     // is thread-safe, and a display that is at most one second stale is free.
     @Volatile private var latestSummary: SessionSummary? = null
     private var lastSavedFile: File? = null
+
+    // --- coach -----------------------------------------------------------------
+    private var coach: CoachRunner? = null
+    @Volatile private var coachStatus: String = "coach — starting…"
+    @Volatile private var lastCoachMessage: CoachMessage? = null
+    @Volatile private var lastCoachTiming: String = ""
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -133,6 +143,21 @@ class SessionActivity : ComponentActivity() {
             text = "Export session JSON"
             setOnClickListener { exportSession() }
         }
+        coachText = TextView(this).apply {
+            textSize = 15f
+            setPadding(pad, pad, pad, pad)
+            setBackgroundColor(Color.parseColor("#11000000"))
+            text = "coach — starting…"
+        }
+        languageButton = Button(this).apply {
+            text = "Coach: English"
+            setOnClickListener {
+                val next = if (coach?.language == CoachLanguage.FRENCH) CoachLanguage.ENGLISH
+                           else CoachLanguage.FRENCH
+                coach?.language = next
+                text = if (next == CoachLanguage.FRENCH) "Coach : français" else "Coach: English"
+            }
+        }
 
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -146,8 +171,14 @@ class SessionActivity : ComponentActivity() {
             })
             addView(elapsedText, row())
             addView(summaryText, row())
+            addView(coachText, LinearLayout.LayoutParams(MATCH, WRAP).apply {
+                setMargins(pad, pad, pad, 0)
+            })
+            addView(languageButton, LinearLayout.LayoutParams(MATCH, WRAP).apply {
+                setMargins(pad, pad / 2, pad, 0)
+            })
             addView(exportButton, LinearLayout.LayoutParams(MATCH, WRAP).apply {
-                setMargins(pad, pad, pad, pad)
+                setMargins(pad, pad / 2, pad, pad)
             })
         }
         setContentView(root)
@@ -175,6 +206,19 @@ class SessionActivity : ComponentActivity() {
         }
     }
 
+    private fun startCoach() {
+        coach = CoachRunner(
+            modelFile = File(getExternalFilesDir(null) ?: filesDir, "models/model.gguf"),
+            onMessage = { message, timing ->
+                lastCoachMessage = message
+                lastCoachTiming = timing
+                // Coaching messages are rare, so they are stored whole rather than thinned.
+                synchronized(sessionLock) { sessionBuilder?.addCoachMessage(message) }
+            },
+            onStatus = { status -> coachStatus = status },
+        ).also { it.start() }
+    }
+
     private fun startPipeline() {
         pipeline = FacePipeline(
             activity = this,
@@ -182,6 +226,7 @@ class SessionActivity : ComponentActivity() {
             onResult = { sample, _, _ -> onFaceSample(sample) },
             onError = { message -> statusText.text = message },
         ).also { it.start(previewView) }
+        startCoach()
     }
 
     /** Called on the detector thread. */
@@ -190,6 +235,7 @@ class SessionActivity : ComponentActivity() {
         val state = focusScorer.update(snapshot)
         latestSnapshot = snapshot
         latestState = state
+        coach?.onState(state, snapshot)
 
         synchronized(sessionLock) {
             sessionBuilder?.add(snapshot, state)
@@ -259,6 +305,15 @@ class SessionActivity : ComponentActivity() {
             timelineScores.toIntArray() to timelineFatigue.toBooleanArray()
         }
         sparkline.setData(scores, flags)
+
+        val message = lastCoachMessage
+        coachText.text = if (message == null) {
+            coachStatus
+        } else {
+            // The measured cost of the message is shown next to it, always. A coaching app
+            // that hides its own latency cannot be judged on optimisation.
+            "\"${message.text}\"\n\n${message.trigger.lowercase()} · $lastCoachTiming"
+        }
 
         val summary = latestSummary ?: return
         summaryText.text = buildString {
@@ -350,6 +405,8 @@ class SessionActivity : ComponentActivity() {
         ioExecutor.shutdown()
         pipeline?.close()
         pipeline = null
+        coach?.close()
+        coach = null
     }
 
     private companion object {

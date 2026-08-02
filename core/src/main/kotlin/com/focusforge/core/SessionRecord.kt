@@ -30,6 +30,12 @@ data class SessionRecording(
     val device: Map<String, String> = emptyMap(),
     val summary: SessionTotals = SessionTotals(),
     val samples: List<SessionSample> = emptyList(),
+    /**
+     * What the coach said, why, and how fast it said it. The trigger travels with every
+     * message so the log explains its own behaviour — an unexplained coaching message is
+     * as bad as an unexplained governor decision.
+     */
+    val coachMessages: List<CoachMessage> = emptyList(),
 ) {
     companion object {
         const val SCHEMA_VERSION = 1
@@ -135,12 +141,18 @@ class SessionBuilder(
     private val fullRateMinFps: Double = SignalThresholds.BLINK_FULL_RATE_MIN_FPS,
 ) {
     private val samples = ArrayList<SessionSample>()
+    private val coachMessages = ArrayList<CoachMessage>()
     private var firstTimestampMs: Long? = null
     private var lastKeptMs: Long? = null
     /** Frames seen since the last exported row, for that row's own effective frame rate. */
     private var framesSinceKept = 0
 
     val sampleCount: Int get() = samples.size
+
+    /** Coaching messages are rare events, so they are kept whole rather than thinned. */
+    fun addCoachMessage(message: CoachMessage) {
+        coachMessages += message
+    }
 
     fun add(snapshot: SignalSnapshot, state: FocusState) {
         val start = firstTimestampMs ?: snapshot.timestampMs.also { firstTimestampMs = it }
@@ -208,6 +220,7 @@ class SessionBuilder(
             blinkRateValidity = summary.signals.blinkRateValidity.wire,
         ),
         samples = samples.toList(),
+        coachMessages = coachMessages.toList(),
     )
 
     private fun validity(fps: Double): BlinkRateValidity =

@@ -1,0 +1,253 @@
+package com.focusforge.core
+
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertNotNull
+import kotlin.test.assertNull
+import kotlin.test.assertTrue
+
+/**
+ * The coach's trigger rules.
+ *
+ * These matter more than they look. A coach that speaks too often is not a mildly worse
+ * coach — it is an app the user turns off, which makes every other number in this project
+ * moot. So the tests are mostly about **silence**: the conditions under which it must not
+ * speak, and the guarantee that two rules firing at once still produce one message.
+ */
+class CoachPolicyTest {
+
+    private fun state(
+        elapsedMs: Long,
+        score: Int = 90,
+        fatigue: Boolean = false,
+        ready: Boolean = true,
+    ) = FocusState(
+        timestampMs = elapsedMs,
+        elapsedMs = elapsedMs,
+        score = score,
+        rawScore = score.toDouble(),
+        attention = 1.0,
+        alertness = 1.0,
+        steadiness = 1.0,
+        fatigue = fatigue,
+        fatigueEvidence = if (fatigue) 0.8 else 0.0,
+        ready = ready,
+    )
+
+    private fun snapshot(elapsedMs: Long) = SignalSnapshot(
+        timestampMs = elapsedMs,
+        elapsedMs = elapsedMs,
+        calibrated = true,
+        faceVisible = true,
+        eyeClosure = 0.1,
+        eyesClosedNow = false,
+        blinkCount = 10,
+        blinkRatePerMin = 12.0,
+        lastBlinkDurationMs = 150L,
+        longClosureCount = 2,
+        perclos = 0.02,
+        perclosCoverageMs = 60_000L,
+        gazeOnScreen = true,
+        gazeOnScreenFraction = 0.8,
+        headYawDevDeg = 1.0,
+        headPitchDevDeg = 1.0,
+        headRollDeg = 0.0,
+        irisHorizontalDev = 0.0,
+        headStabilityDeg = 3.0,
+        headStable = true,
+        yawnCount = 0,
+        visionFps = 9.0,
+        blinkRateValidity = BlinkRateValidity.UNDERSAMPLED,
+    )
+
+    /** Runs a session, returning every message the coach decided to send. */
+    private fun run(
+        durationMs: Long,
+        stepMs: Long = 1_000L,
+        policy: CoachPolicy = CoachPolicy(),
+        at: (Long) -> FocusState,
+    ): List<CoachContext> {
+        val out = ArrayList<CoachContext>()
+        var t = 0L
+        while (t <= durationMs) {
+            policy.update(at(t), snapshot(t))?.let { out += it }
+            t += stepMs
+        }
+        return out
+    }
+
+    // ------------------------------------------------------------------ silence
+
+    @Test
+    fun `says nothing during the warm-up, however bad the numbers look`() {
+        val messages = run(CoachThresholds.MIN_SESSION_MS - 1_000L) { t ->
+            state(t, score = 5, fatigue = true, ready = false)
+        }
+        assertTrue(messages.isEmpty(), "spoke ${messages.size} times during warm-up")
+    }
+
+    @Test
+    fun `says nothing at all during a good session before the first milestone`() {
+        val messages = run(9 * 60_000L) { t -> state(t, score = 95) }
+        assertTrue(messages.isEmpty(), "a focused session should be left alone, got $messages")
+    }
+
+    @Test
+    fun `a brief dip below the low-focus line is not worth a message`() {
+        // Down for 60 s, back up. The dwell is 2 minutes precisely so this is ignored.
+        val messages = run(9 * 60_000L) { t ->
+            state(t, score = if (t in 120_000L..180_000L) 30 else 90)
+        }
+        assertTrue(messages.isEmpty(), "reacted to a one-minute dip: $messages")
+    }
+
+    @Test
+    fun `never speaks twice inside the minimum gap`() {
+        // Everything wrong at once, for half an hour.
+        val messages = run(30 * 60_000L) { t -> state(t, score = 10, fatigue = t > 90_000L) }
+        assertTrue(messages.isNotEmpty(), "should have spoken at least once")
+        val gaps = messages.zipWithNext { a, b -> b.elapsedMs - a.elapsedMs }
+        for (gap in gaps) {
+            assertTrue(
+                gap >= CoachThresholds.MIN_GAP_MS,
+                "spoke again after only ${gap / 1000}s; minimum is ${CoachThresholds.MIN_GAP_MS / 1000}s",
+            )
+        }
+    }
+
+    @Test
+    fun `two rules firing together still produce one message`() {
+        // A tired user also scores badly, so FATIGUE and LOW_FOCUS are true simultaneously.
+        val policy = CoachPolicy()
+        val messages = run(6 * 60_000L, policy = policy) { t ->
+            state(t, score = 20, fatigue = t >= 180_000L)
+        }
+        val within = messages.filter { it.elapsedMs in 180_000L..185_000L }
+        assertTrue(within.size <= 1, "sent ${within.size} messages for one event")
+    }
+
+    // ------------------------------------------------------------------ speaking
+
+    @Test
+    fun `speaks when the fatigue flag rises`() {
+        val messages = run(8 * 60_000L) { t -> state(t, score = 80, fatigue = t >= 120_000L) }
+        assertTrue(messages.any { it.trigger == CoachTrigger.FATIGUE }, "got $messages")
+        val first = messages.first { it.trigger == CoachTrigger.FATIGUE }
+        assertTrue(first.elapsedMs in 120_000L..121_000L, "spoke at ${first.elapsedMs} ms")
+    }
+
+    @Test
+    fun `speaks once attention has been drifting for the full dwell`() {
+        val messages = run(8 * 60_000L) { t -> state(t, score = 30) }
+        val low = messages.first { it.trigger == CoachTrigger.LOW_FOCUS }
+        // The clock starts at the end of the warm-up, not at t=0.
+        assertTrue(
+            low.elapsedMs >= CoachThresholds.LOW_FOCUS_DWELL_MS,
+            "spoke after only ${low.elapsedMs} ms of drifting",
+        )
+    }
+
+    @Test
+    fun `checks in on the ten-minute milestones of a good session`() {
+        val messages = run(25 * 60_000L) { t -> state(t, score = 95) }
+        assertTrue(messages.all { it.trigger == CoachTrigger.MILESTONE }, "got $messages")
+        assertEquals(2, messages.size, "expected the 10 and 20 minute check-ins, got $messages")
+    }
+
+    @Test
+    fun `a milestone missed inside the quiet window is dropped, not delivered late`() {
+        // Fatigue at 9:30 speaks; the 10:00 milestone lands inside the 5-minute quiet gap.
+        // The user should not be told about the ten-minute mark at minute fifteen.
+        val messages = run(20 * 60_000L) { t ->
+            state(t, score = 85, fatigue = t in 570_000L..600_000L)
+        }
+        val milestones = messages.filter { it.trigger == CoachTrigger.MILESTONE }
+        assertTrue(
+            milestones.none { it.elapsedMs in 600_000L..900_000L },
+            "delivered a stale 10-minute milestone at ${milestones.map { it.elapsedMs }}",
+        )
+    }
+
+    @Test
+    fun `the message carries the numbers behind it`() {
+        val messages = run(8 * 60_000L) { t -> state(t, score = 30) }
+        val c = messages.first()
+        assertEquals(30, c.recentMeanScore)
+        assertEquals(80, c.gazeOnScreenPercent)
+        assertEquals(2, c.longClosures)
+        // Undersampled blink rate must not reach the model as if it were a measurement.
+        assertNull(c.blinkRatePerMin, "an undersampled blink rate was passed to the coach")
+    }
+}
+
+/** The prompt text itself — reviewable because it is data, not string-building in an Activity. */
+class CoachPromptTest {
+
+    private fun context(trigger: CoachTrigger = CoachTrigger.FATIGUE) = CoachContext(
+        trigger = trigger,
+        elapsedMs = 23 * 60_000L,
+        recentMeanScore = 42,
+        gazeOnScreenPercent = 55,
+        longClosures = 3,
+        headMovementDeg = 12.0,
+        perclos = 0.09,
+        blinkRatePerMin = null,
+    )
+
+    @Test
+    fun `the prompt states the numbers and the reason`() {
+        val p = CoachPrompt.build(context(), CoachLanguage.ENGLISH)
+        assertTrue(p.contains("42"), p)
+        assertTrue(p.contains("55%"), p)
+        assertTrue(p.contains("23 minutes"), p)
+        assertTrue(p.contains("40 words"), p)
+        assertTrue(p.contains("tired"), "the reason should be stated in words: $p")
+    }
+
+    @Test
+    fun `an undersampled blink rate is simply absent, not reported as zero`() {
+        // The *rate line* must be gone. The word "blinks" still appears in the fatigue
+        // reason ("longer than normal blinks"), which is prose, not a measurement — an
+        // earlier version of this test failed on exactly that and was testing the wrong thing.
+        val p = CoachPrompt.build(context(), CoachLanguage.ENGLISH)
+        assertFalse(p.contains("blink rate"), "an undersampled rate reached the model: $p")
+
+        val withRate = CoachPrompt.build(
+            context().copy(blinkRatePerMin = 14.0), CoachLanguage.ENGLISH,
+        )
+        assertTrue(withRate.contains("blink rate 14"), "a valid rate should be included: $withRate")
+    }
+
+    @Test
+    fun `French asks for French`() {
+        val p = CoachPrompt.build(context(), CoachLanguage.FRENCH)
+        assertTrue(p.contains("Réponds en français"), p)
+        assertTrue(p.contains("42"), p)
+    }
+
+    @Test
+    fun `every trigger has its own stated reason in both languages`() {
+        for (t in CoachTrigger.entries) {
+            for (lang in CoachLanguage.entries) {
+                val p = CoachPrompt.build(context(t), lang)
+                assertTrue(p.length > 200, "prompt for $t/$lang looks truncated")
+                assertNotNull(p.lines().last { it.isNotBlank() })
+            }
+        }
+    }
+
+    @Test
+    fun `an overrunning model reply is trimmed to the promised length`() {
+        val long = (1..120).joinToString(" ") { "word$it" }
+        val trimmed = CoachPrompt.trimToWords(long, 40)
+        assertEquals(40, trimmed.removeSuffix("…").split(' ').size)
+        assertTrue(trimmed.endsWith("…"))
+    }
+
+    @Test
+    fun `a reply already within the limit is left alone`() {
+        val short = "Take a breath, look out of the window for twenty seconds, then come back."
+        assertEquals(short, CoachPrompt.trimToWords(short, 40))
+    }
+}

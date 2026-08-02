@@ -5,6 +5,58 @@
 > "operator confirmed: &lt;what was seen&gt;". If something is not measured yet, it says
 > `NOT MEASURED YET`.
 
+## 2026-08-02 — The camera and the model fit together; the coach is built
+
+**Did**
+- You gave me the last missing number: a running session uses **177 MB**. That settles the
+  memory question, and the answer is comfortable:
+
+  | | memory | spare of 700 MB |
+  |---|---|---|
+  | session + the big model you tested | 598 MB | 102 MB |
+  | session + the smaller model we ship | **483 MB** | **217 MB** |
+
+  The camera and face tracker only add 44 MB on top of the app — much less than I feared. So
+  **the model can stay loaded for the whole session**, which means a coaching message costs
+  1.2 seconds rather than 3.1.
+- Built the coach. It fires **only on events**: when you start looking tired, when your
+  attention has been drifting for two solid minutes, and as a routine check-in every ten
+  minutes. Never more than one message every five minutes, and nothing at all in the first
+  minute while the app is still calibrating.
+- Most of the work went into making it **shut up**. A coach that comments on every dip is one
+  you turn off, so the rules are written to stay quiet: a one-minute dip is ignored, two
+  reasons firing at once still produce one message, and a check-in that falls inside a quiet
+  window is dropped rather than delivered late — nobody wants to be told about the ten-minute
+  mark at minute fifteen.
+- English/French toggle on the session screen. Every message shows **its own measured cost**
+  next to it — time to first word and tokens per second — and both go into the exported file
+  with the reason the coach spoke.
+
+**Evidence**
+- Operator-confirmed: `session 01:09  8.4 fps  177 MB` on the A20e.
+- **114 `:core` tests pass**, 16 of them new and mostly about silence: no messages during
+  warm-up, none during a good session before the first check-in, none for a brief dip, never
+  two inside five minutes, and no stale milestones.
+- The prompt is built and tested in `:core` rather than assembled inside a screen, so its
+  exact wording is reviewable. It contains only numbers you can see on your own display.
+- **Not yet measured: the coach running on the phone.** That is the next thing you do.
+
+**Next — what you do**
+1. Install `0.5.3-coach`. **Start focus session.** Leave it running with the model imported.
+2. It will greet you at the ten-minute mark. To trigger the tired path sooner, do the slow
+   blinks from the drowsy recording — eyes shut about two seconds, every eight or so.
+3. **Turn on airplane mode before you do this** and screenshot the coaching message with the
+   airplane icon visible. That screenshot is a required submission artifact.
+4. Export the session JSON and send it.
+
+**Risks**
+- The memory figures above are addition, not a simultaneous measurement. The real test is
+  this run, and the session screen shows RSS live — watch it.
+- 360M-parameter models say odd things. If the advice is strange, that is the model, not the
+  pipeline; the fix is prompt wording, and the prompt is one testable function.
+
+---
+
 ## 2026-08-02 — Phase 5 gate PASSED on all three targets
 
 **Did**
