@@ -40,3 +40,10 @@ Thumbs.db
 
 # Windows "downloaded from the internet" metadata, created when files are copied from the phone via WSL
 *:Zone.Identifier
+
+# Saved phone address for scripts/sync-device.sh — local, and not the same on any two machines
+.device
+
+# Screenshots pulled off the phone are STAGED here and never auto-committed: a phone's
+# screenshot folder is the operator's whole life, and the Session screen shows their face.
+docs/screenshots/incoming/
