@@ -32,6 +32,7 @@ class LlmSmokeActivity : Activity() {
 
     private lateinit var output: TextView
     private lateinit var runButton: Button
+    private lateinit var benchButton: Button
     private val worker = Executors.newSingleThreadExecutor()
 
     private val modelFile: File
@@ -55,12 +56,17 @@ class LlmSmokeActivity : Activity() {
             text = "2. Generate 20 tokens"
             setOnClickListener { runSmokeTest() }
         }
+        benchButton = Button(this).apply {
+            text = "3. Benchmark: threads x cache"
+            setOnClickListener { runBenchmark() }
+        }
 
         setContentView(ScrollView(this).apply {
             addView(LinearLayout(context).apply {
                 orientation = LinearLayout.VERTICAL
                 addView(importButton, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
                 addView(runButton, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
+                addView(benchButton, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
                 addView(output, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
             })
         })
@@ -226,6 +232,74 @@ class LlmSmokeActivity : Activity() {
         appendLine("Send this whole block to the architect, whatever it says.")
     }
 
+    // ------------------------------------------------------------------ benchmark
+
+    /**
+     * Sweeps thread count against KV-cache reuse, on a prompt the size of a real coaching
+     * one. This is the Phase 6 self-benchmark in miniature, done by hand: the governor will
+     * run exactly these two axes automatically and write the winner into a device profile.
+     *
+     * It exists because the two questions cannot be answered from a normal session. Cache
+     * reuse only pays from the *second* message onward, and the coach's five-minute quiet
+     * rule means a short session can never produce two — so the optimisation shipped in
+     * 0.5.6 was measured at zero benefit purely because it was never exercised.
+     */
+    private fun runBenchmark() {
+        val model = modelFile
+        if (!model.exists()) {
+            toast("Import a .gguf model first")
+            return
+        }
+        benchButton.isEnabled = false
+        runButton.isEnabled = false
+        output.text = "Benchmarking ${THREAD_SWEEP.joinToString(", ")} threads…\n" +
+            "Each opens the model, generates once cold, then twice more with the cache warm.\n" +
+            "This takes a couple of minutes. Leave the screen on."
+
+        worker.execute {
+            val report = StringBuilder()
+            report.appendLine("FocusForge benchmark — threads x KV cache")
+            report.appendLine(LlamaBridge.buildInfo())
+            report.appendLine("model ${model.name}  %.0f MB   n_ctx=$N_CTX"
+                .format(Locale.US, model.length() / 1e6))
+            report.appendLine("prompt is a realistic coaching prompt, not the short smoke-test one")
+            report.appendLine()
+            report.appendLine("threads  load    run   prompt  reused  TTFT     decode")
+
+            for (threads in THREAD_SWEEP) {
+                val session = LlamaBridge.open(model.absolutePath, threads, N_CTX)
+                if (session == null) {
+                    report.appendLine("$threads: FAILED — ${LlamaBridge.lastError}")
+                    continue
+                }
+                // Same prompt shape each time, different numbers — exactly what the coach
+                // does, so the shared prefix is the real one rather than a flattering one.
+                for ((i, prompt) in BENCH_PROMPTS.withIndex()) {
+                    val r = LlamaBridge.generate(session, prompt, 20)
+                    if (!r.ok) {
+                        report.appendLine("%7d  %5d  %5d  FAILED: %s"
+                            .format(threads, session.loadMs, i + 1, r.error))
+                        continue
+                    }
+                    report.appendLine("%7d  %5d  %5d  %6d  %6d  %5d ms  %.1f tok/s".format(
+                        Locale.US, threads, session.loadMs, i + 1,
+                        r.promptTokens, r.cachedPrefixTokens, r.ttftMs, r.tokensPerSecond))
+                }
+                LlamaBridge.close(session)
+                report.appendLine()
+            }
+            report.appendLine("Run 1 is cold (empty cache). Runs 2 and 3 reuse the shared")
+            report.appendLine("instruction prefix — the 'reused' column says how much.")
+            report.appendLine("Contract: TTFT <= 3000 ms, decode >= 5 tok/s.")
+
+            runOnUiThread {
+                benchButton.isEnabled = true
+                runButton.isEnabled = true
+                output.text = report.toString()
+            }
+        }
+    }
+
     private fun toast(m: String) = Toast.makeText(this, m, Toast.LENGTH_LONG).show()
 
     override fun onDestroy() {
@@ -249,5 +323,30 @@ class LlmSmokeActivity : Activity() {
         const val N_CTX = 512
         const val MAX_TOKENS = 20
         const val RSS_BUDGET_MB = 700.0
+
+        /**
+         * The A20e is 2x Cortex-A73 + 6x Cortex-A53. Two threads was the documented starting
+         * point (CLAUDE.md 5); this sweep is how we find out whether it was the right one,
+         * rather than assuming. Prompt processing is compute-bound and parallelises, and TTFT
+         * on this device is almost entirely prompt processing.
+         */
+        val THREAD_SWEEP = listOf(2, 4, 6)
+
+        /**
+         * Three prompts with the same opening and different numbers — the shape the coach
+         * actually produces. Using one identical prompt three times would reuse the entire
+         * cache and report a benefit we would never see in practice.
+         */
+        val BENCH_PROMPTS = listOf(
+            "Encourage someone studying. One message, max 40 words, speak to them directly, " +
+                "no lists.\nLast minutes: focus 42/100, eyes on work 55%, 3 long eye closures, " +
+                "head 12.0 deg, 23 min in.\nThey look tired: eyes closing longer than blinks.\n",
+            "Encourage someone studying. One message, max 40 words, speak to them directly, " +
+                "no lists.\nLast minutes: focus 61/100, eyes on work 74%, 1 long eye closures, " +
+                "head 4.5 deg, 31 min in.\nTheir attention has been drifting.\n",
+            "Encourage someone studying. One message, max 40 words, speak to them directly, " +
+                "no lists.\nLast minutes: focus 88/100, eyes on work 91%, 0 long eye closures, " +
+                "head 1.2 deg, 40 min in.\nRoutine check-in, nothing is wrong.\n",
+        )
     }
 }

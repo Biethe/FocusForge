@@ -5,6 +5,41 @@
 > Every optimization gets before/after numbers from committed benchmark files —
 > negative results are kept and reported honestly.
 
+## 2026-08-02 — The cache optimisation was never exercised; measure it properly
+
+Two sessions on 0.5.6 produced **one coach message each**, so cache reuse never happened:
+TTFT 4825 and 4883 ms, statistically identical to the 4836 ms before the change. The first
+message of a session always has an empty cache.
+
+**This is a measurement failure, not an optimisation failure**, and the cause is our own
+design: `MIN_GAP_MS` is five minutes and both sessions were about two, so a second message
+was impossible by construction. Asking the operator for a six-minute session with two
+separate fatigue episodes would be a slow and unreliable way to learn one number.
+
+**So the smoke screen gains a benchmark**: it sweeps thread count against cache reuse, using
+three prompts with the same opening and different figures — the shape the coach actually
+produces. Using one identical prompt three times would reuse the whole cache and report a
+benefit we would never see in practice.
+
+Threads are in the sweep because they are the other untested lever. Two threads was a
+*documented starting point* from CLAUDE.md §5, never a measured choice, and the A20e has
+2×A73 + 6×A53. Prompt processing is compute-bound and parallelises, and TTFT here is almost
+entirely prompt processing — so thread count may matter more than anything else we have
+tried. **This is the Phase 6 self-benchmark in miniature, run by hand**; the governor will run
+these same two axes automatically and write the winner into a device profile.
+
+### Message quality, from reading what the model actually said
+
+- One reply had the model answering **as the tired student**: *"I'm feeling a bit overwhelmed
+  with the workload... can we take a break?"* The prompt said "Encourage someone studying",
+  which implies the role instead of stating it. Now: "You are a study coach talking to a
+  student." A 360M model needs its role stated.
+- **Both replies ran to the token cap and stopped mid-clause.** A cap the model keeps hitting
+  is set too high for it: the ask is now one sentence under 30 words, the cap is 60 tokens
+  rather than 80, and the trimmer cuts back to the last **complete sentence** rather than
+  mid-word — unless the only full stop is in the first few words, where an ellipsis is more
+  useful than "Hi."
+
 ## 2026-08-02 — TTFT is prompt processing; reuse the KV cache, and stop writing French prompts
 
 Both fixes from the previous entry are confirmed on the device, and three measurements now

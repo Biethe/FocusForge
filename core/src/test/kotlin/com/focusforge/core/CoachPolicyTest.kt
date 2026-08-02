@@ -239,7 +239,7 @@ class CoachPromptTest {
         assertTrue(p.contains("42"), p)
         assertTrue(p.contains("55%"), p)
         assertTrue(p.contains("23 min"), p)
-        assertTrue(p.contains("40 words"), p)
+        assertTrue(p.contains("${CoachThresholds.MAX_WORDS} words"), p)
         assertTrue(p.contains("tired"), "the reason should be stated in words: $p")
     }
 
@@ -307,6 +307,27 @@ class CoachPromptTest {
         val trimmed = CoachPrompt.trimToWords(long, 40)
         assertEquals(40, trimmed.removeSuffix("…").split(' ').size)
         assertTrue(trimmed.endsWith("…"))
+    }
+
+    @Test
+    fun `a rambling reply is cut back to the last finished sentence`() {
+        // Both messages generated on the A20e ran to the token cap and stopped mid-clause.
+        // A shorter finished thought reads better than a longer unfinished one.
+        val rambling = "Take a short break and stretch. You have been at this a while and " +
+            "your eyes are telling you something, so maybe consider whether the next twenty " +
+            "minutes would really be"
+        val trimmed = CoachPrompt.trimToWords(rambling, 30)
+        assertTrue(trimmed.endsWith("."), "should end on a full stop, got: $trimmed")
+        assertFalse(trimmed.endsWith("…"), trimmed)
+        assertTrue(trimmed.startsWith("Take a short break"), trimmed)
+    }
+
+    @Test
+    fun `an ellipsis is still used when the only full stop is too early`() {
+        // Cutting to "Hi." would technically be a finished sentence and useless advice.
+        val text = "Hi. " + (1..80).joinToString(" ") { "word$it" }
+        val trimmed = CoachPrompt.trimToWords(text, 30)
+        assertTrue(trimmed.endsWith("…"), "expected an ellipsis, got: $trimmed")
     }
 
     @Test

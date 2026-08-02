@@ -133,9 +133,12 @@ class CoachRunner(
         const val TAG = "FocusCoach"
 
         /**
-         * A 40-word message is about 60 tokens; 80 leaves room for the model to finish a
-         * sentence, and [CoachPrompt.trimToWords] enforces the promise if it does not.
+         * A 30-word message is roughly 45 tokens; 60 leaves room to finish a sentence, and
+         * [CoachPrompt.trimToWords] enforces the promise if the model does not.
+         *
+         * Lowered from 80 after both on-device messages ran to the cap and were cut
+         * mid-clause. A cap the model keeps hitting is a cap set too high for it.
          */
-        const val MAX_TOKENS = 80
+        const val MAX_TOKENS = 60
     }
 }

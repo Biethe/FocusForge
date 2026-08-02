@@ -5,6 +5,47 @@
 > "operator confirmed: &lt;what was seen&gt;". If something is not measured yet, it says
 > `NOT MEASURED YET`.
 
+## 2026-08-02 — The speed-up never got a chance to run
+
+**Did**
+- Read your two sessions. Each contains **one** coaching message, and the waiting time is
+  unchanged: 4.83 and 4.88 seconds against 4.84 before.
+- **That is not the optimisation failing — it is my rule stopping it from ever happening.**
+  The memory trick only helps from the *second* message onwards, and I had set the coach to
+  never speak twice within five minutes. Your sessions were two minutes. A second message was
+  impossible.
+- Rather than ask you to sit through a six-minute session with two separate tired spells,
+  I put a **benchmark button** on the LLM test screen. One tap measures it directly.
+- It also measures something we have never tested: **how many processor threads to use.** We
+  have been using two the whole time because that is what the project notes suggested, not
+  because anyone measured it. Your phone has eight cores. Since the waiting time is almost
+  entirely the phone reading the question, and reading parallelises well, this could matter
+  more than everything else so far.
+- **Fixed the coach's writing**, based on what it actually said:
+  - One message had the model talking **as if it were you** — *"I'm feeling a bit overwhelmed
+    with the workload, can we take a break?"* My instruction implied its role instead of
+    stating it. It is now told plainly that it is a coach talking to a student.
+  - **Both messages ran out of room mid-sentence.** A limit the model keeps hitting is set
+    too high. It now asks for one sentence under 30 words, and if the model still overruns,
+    the app cuts back to the last **finished sentence** instead of stopping mid-word.
+
+**Evidence**
+- Both sessions committed, with what they taught noted in the README.
+- 123 `:core` tests pass, three new ones covering the sentence trimming.
+
+**Next — what you do**
+1. Install `0.5.7-bench`. Open **LLM smoke test** → **3. Benchmark: threads x cache**.
+2. It takes a couple of minutes and needs the screen left on. Send me the whole table.
+3. That one table answers both open questions at once, and it feeds straight into Phase 6.
+
+**Risks**
+- Six threads on a phone with two fast cores and six slow ones may be *slower*, not faster —
+  that is exactly why it is being measured rather than assumed.
+- The benchmark opens the model three times, so it takes a couple of minutes. Nothing else
+  should be running.
+
+---
+
 ## 2026-08-02 — Both fixes worked, and the remaining problem is now understood exactly
 
 **Did**

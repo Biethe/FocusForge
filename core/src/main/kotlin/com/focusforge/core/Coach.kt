@@ -41,8 +41,13 @@ object CoachThresholds {
     /** Window the coach is told about: recent enough to be relevant, long enough to be real. */
     const val SUMMARY_WINDOW_MS = 5 * 60_000L
 
-    /** Hard ceiling on the reply. The screen shows it next to a live score; it must be glanceable. */
-    const val MAX_WORDS = 40
+    /**
+     * Hard ceiling on the reply. The screen shows it beside a live score, so it must be
+     * glanceable — and both messages generated on the A20e ran to the token cap and were cut
+     * off mid-sentence, which reads worse than a short answer. Asking for one sentence under
+     * 30 words gives a small model a target it can actually hit.
+     */
+    const val MAX_WORDS = 30
 }
 
 data class CoachConfig(
@@ -242,8 +247,12 @@ object CoachPrompt {
         val blink = context.blinkRatePerMin?.let { ", ${fmt(it)} blinks/min" } ?: ""
         return when (language) {
             CoachLanguage.ENGLISH ->
-                "Encourage someone studying. One message, max $maxWords words, speak to them " +
-                    "directly, no lists.\n" +
+                // "You are a coach talking to a student" rather than "encourage someone":
+                // on the A20e the vaguer wording made the model answer *as* the tired student
+                // — "I'm feeling a bit overwhelmed with the workload... can we take a break?"
+                // A 360M model needs its role stated, not implied.
+                "You are a study coach talking to a student. Write ONE encouraging sentence " +
+                    "to them, under $maxWords words.\n" +
                     "Last minutes: focus ${context.recentMeanScore}/100, " +
                     "eyes on work ${context.gazeOnScreenPercent}%, " +
                     "${context.longClosures} long eye closures, " +
@@ -257,8 +266,8 @@ object CoachPrompt {
             // also produced a refusal ("je ne peux pas répondre"), so the longer prompt bought
             // worse output as well as slower. See docs/DECISIONS.md 2026-08-02.
             CoachLanguage.FRENCH ->
-                "Encourage someone studying. One message, max $maxWords words, speak to them " +
-                    "directly, no lists. Write your reply in French.\n" +
+                "You are a study coach talking to a student. Write ONE encouraging sentence " +
+                    "to them, under $maxWords words. Write your reply in French.\n" +
                     "Last minutes: focus ${context.recentMeanScore}/100, " +
                     "eyes on work ${context.gazeOnScreenPercent}%, " +
                     "${context.longClosures} long eye closures, " +
@@ -284,8 +293,12 @@ object CoachPrompt {
     private fun fmt(v: Double): String = ((v * 10).toInt() / 10.0).toString()
 
     /**
-     * Small models overrun word limits and sometimes restart the sentence. Trimming here
-     * rather than trusting the prompt keeps the UI's promise regardless of the model.
+     * Small models overrun word limits and restart sentences. Trimming here rather than
+     * trusting the prompt keeps the UI's promise whatever the model does.
+     *
+     * Cuts back to the last **complete sentence** where possible. Both messages generated on
+     * the A20e ran to the token cap and stopped mid-clause — "...you're closing your eyes
+     * for…" — which reads worse than a shorter, finished thought.
      */
     fun trimToWords(text: String, maxWords: Int = CoachThresholds.MAX_WORDS): String {
         // Small models like to open with a stray quote or a leading colon, which then shows
@@ -294,7 +307,19 @@ object CoachPrompt {
             .removePrefix("\"").removePrefix("'").removePrefix(":").trim()
             .replace(Regex("\\s+"), " ")
         val words = cleaned.split(' ').filter { it.isNotEmpty() }
+        val capped = if (words.size <= maxWords) cleaned else words.take(maxWords).joinToString(" ")
+
+        // Prefer a finished sentence, but not at the cost of saying almost nothing: if the
+        // only full stop is in the first few words, the ellipsis is the better answer.
+        val lastStop = capped.indexOfLast { it == '.' || it == '!' || it == '?' }
+        if (lastStop >= 0) {
+            val upToStop = capped.substring(0, lastStop + 1)
+            if (upToStop.split(' ').size >= MIN_SENTENCE_WORDS) return upToStop
+        }
         if (words.size <= maxWords) return cleaned
-        return words.take(maxWords).joinToString(" ").trimEnd(',', ';', ':') + "…"
+        return capped.trimEnd(',', ';', ':') + "…"
     }
+
+    /** Below this a "complete sentence" is too short to be worth preferring over more text. */
+    private const val MIN_SENTENCE_WORDS = 6
 }
