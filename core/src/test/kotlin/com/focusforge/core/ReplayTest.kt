@@ -422,13 +422,21 @@ class AllRecordingsOrderingTest {
 
     @Test
     fun `PERCLOS alone does NOT separate every drowsy session, and this records that`() {
-        // A negative result, kept deliberately (CLAUDE.md §4.1).
+        // A negative result, kept deliberately (CLAUDE.md §4.1), and worth the trouble it
+        // caused. Two explanations for it were proposed and both were wrong:
         //
-        // One of the three drowsy recordings measures PERCLOS 0.000 — identical to a focused
-        // session — while still being unmistakably drowsy by long closures (5 against 0). Had
-        // the fusion rested on PERCLOS alone, that session would have read as perfectly alert.
-        // It is the clearest evidence available for the multi-signal design in §15.8, and it
-        // only appeared because there was more than one recording per label.
+        //   - "the recording predates the PERCLOS fix" — no: replay recomputes PERCLOS from
+        //     the raw landmarks with today's code, so the app version at capture is irrelevant.
+        //   - "the eye geometry left no dynamic range" — no: that session's calibrated open
+        //     eye is 0.274, entirely normal, and only 12% of its frames sit under any
+        //     plausible floor. A validity flag built on that theory was implemented, found to
+        //     flag the WRONG recording, and reverted.
+        //
+        // The measurement was right all along: in that session the eyes closed to 74% of
+        // their open aperture and no further. P80 is a real line and those closures were
+        // genuinely below it, while five sustained closures still made the drowsiness
+        // obvious. Had the fusion rested on PERCLOS alone, that session would have read as
+        // perfectly alert — which is the clearest evidence available for §15.8.
         val all = require("focused", "drowsy")
         val drowsy = all.getValue("drowsy")
         val worstDrowsyPerclos = drowsy.minOf { it.signals.perclos }

@@ -34,6 +34,7 @@ RIGHT_EYE_EAR = [362, 385, 387, 263, 373, 380]
 # Mirrors core/.../SignalConfig.kt
 EAR_OPEN_REF = 0.28
 BASELINE_CALIBRATION_MS = 5000
+EAR_OPEN_WINDOW_MS = 60000
 BASELINE_MIN_SAMPLES = 10
 BLINK_MIN_MS = 50
 BLINK_MAX_MS = 500
@@ -93,12 +94,31 @@ def frames(recording):
 
 
 def open_reference(rows):
-    """Replicates BaselineCalibrator.earOpen: median EAR over the calibration window."""
-    start = next((t for t, _, e in rows if e is not None), 0)
-    window = [e for t, _, e in rows if e is not None and t - start <= BASELINE_CALIBRATION_MS]
-    if len(window) < BASELINE_MIN_SAMPLES:
+    """Replicates BaselineCalibrator.earOpen: median EAR over a ROLLING window.
+
+    This used to replicate the older behaviour — a median frozen after the first five
+    seconds — and quietly kept doing so after the engine moved to a rolling window. The two
+    disagree badly on some recordings (0.101 against 0.274 on one), and that stale
+    replication produced a confident and wrong diagnosis on 2026-08-02. A script that
+    mirrors engine behaviour has to be updated with it or it becomes a liar with a
+    plausible manner.
+
+    Returns the median of the rolling references, for a single summary figure. Use the
+    engine itself when the per-frame value matters.
+    """
+    refs = []
+    window = []
+    for t, _, e in rows:
+        if e is None or e <= 0:
+            continue
+        window.append((t, e))
+        while window and t - window[0][0] > EAR_OPEN_WINDOW_MS:
+            window.pop(0)
+        if len(window) >= BASELINE_MIN_SAMPLES:
+            refs.append(percentile(sorted(v for _, v in window), 50))
+    if not refs:
         return EAR_OPEN_REF
-    return percentile(window, 50)
+    return percentile(sorted(refs), 50)
 
 
 def closure_trace(rows, ear_open):

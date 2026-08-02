@@ -1060,3 +1060,32 @@ before, PERCLOS looked like a reliable discriminator.
 This is kept as a test that asserts the *limitation* rather than being quietly dropped: if a
 future change makes PERCLOS separate every pair, that test fails and tells whoever made it to
 come and update this section.
+
+#### Two explanations were proposed for that 0.000, and both were wrong
+
+Worth recording, because the wrong answers were more plausible than the right one.
+
+**"The recording predates the PERCLOS fix, so its 0.000 is the old bug."** No. A replay
+recomputes every signal from the raw landmarks using today's code — that is the entire point
+of storing landmarks rather than conclusions. The app version at capture cannot affect a
+replayed number.
+
+**"The eye geometry left no dynamic range."** Also no, and this one got as far as being
+implemented. The theory: closure is `1 - EAR/earOpen`, the face mesh floors out near an EAR
+of 0.03 however tightly the eye shuts, so an open reference under about 0.15 makes P80
+arithmetically unreachable. A `PerclosValidity` flag was built on it — and then measured
+against the recordings, where it flagged **the wrong file**. Reverted.
+
+The figures that motivated it came from `bench/analyze_blinks.py`, which was still
+replicating the *frozen* five-second calibration the engine had already replaced with a
+rolling one. On this recording the two disagree by a factor of nearly three — 0.101 against
+0.274 — and the stale number made a confident, wrong diagnosis look well-supported. **A
+script that mirrors engine behaviour has to be updated with it, or it becomes a liar with a
+plausible manner.** The script now uses the rolling window.
+
+Measured with the engine itself, that session's open-eye reference is **0.274 — entirely
+normal**. Its deepest closure is **0.744**. So the plain reading was right all along: in that
+session the eyes closed to about three-quarters of their open aperture and no further. P80 is
+a real line, those closures were genuinely under it, and the five sustained closures are what
+made the drowsiness visible. Nothing was broken; the signal simply has a blind spot, which is
+what §15.8 exists for.
