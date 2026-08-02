@@ -24,11 +24,19 @@ class SessionStore(private val context: Context) {
         get() = File(context.getExternalFilesDir(null) ?: context.filesDir, DIR_NAME)
             .apply { mkdirs() }
 
-    fun save(session: SessionRecording): File {
-        val stamp = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date())
-        val file = File(directory, "session-${deviceSlug()}-$stamp.json")
+    /**
+     * @param target overwrite this file instead of creating a new one. Used by the autosave,
+     *        so a session is one growing file rather than a folder full of snapshots.
+     */
+    fun save(session: SessionRecording, target: File? = null): File {
+        val file = target ?: newSessionFile()
         file.writeText(SessionJson.encode(session))
         return file
+    }
+
+    fun newSessionFile(): File {
+        val stamp = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date())
+        return File(directory, "session-${deviceSlug()}-$stamp.json")
     }
 
     fun shareIntent(file: File): Intent {

@@ -88,6 +88,18 @@ class SessionActivity : ComponentActivity() {
     @Volatile private var latestSummary: SessionSummary? = null
     private var lastSavedFile: File? = null
 
+    /**
+     * The file this session is being written to as it runs.
+     *
+     * A session used to reach storage only when someone pressed Export, which meant a run
+     * nobody thought to export simply did not exist afterwards — and the operator had to
+     * remember to press a button at the end of every session for the evidence to survive.
+     * It is now written continuously to one file, so pulling the device always yields what
+     * actually happened.
+     */
+    private var autosaveFile: File? = null
+    private var lastAutosaveMs = 0L
+
     // --- governor ---------------------------------------------------------------
     // Only present once the device has been profiled. Without a profile there is nothing to
     // govern against, and inventing a configuration would defeat the point of measuring one.
@@ -367,7 +379,32 @@ class SessionActivity : ComponentActivity() {
     private val uiTick = object : Runnable {
         override fun run() {
             render()
+            autosave()
             uiHandler.postDelayed(this, 1_000L)
+        }
+    }
+
+    /**
+     * Writes the session as it goes, on the IO thread.
+     *
+     * Every [AUTOSAVE_INTERVAL_MS], not every tick: a session of a few hundred rows is small,
+     * but writing it once a second for an hour would be an hour of pointless flash traffic on
+     * a phone whose battery is one of the things being measured.
+     */
+    private fun autosave(force: Boolean = false) {
+        val builder = synchronized(sessionLock) { sessionBuilder } ?: return
+        if (builder.sampleCount == 0) return
+        val now = SystemClock.uptimeMillis()
+        if (!force && now - lastAutosaveMs < AUTOSAVE_INTERVAL_MS) return
+        lastAutosaveMs = now
+
+        val summary = latestSummary ?: return
+        val session = synchronized(sessionLock) { builder.build(summary) }
+        val target = autosaveFile ?: sessionStore.newSessionFile().also { autosaveFile = it }
+        ioExecutor.execute {
+            runCatching { sessionStore.save(session, target) }
+                .onSuccess { lastSavedFile = it }
+                .onFailure { Log.e(TAG, "autosave failed", it) }
         }
     }
 
@@ -467,8 +504,11 @@ class SessionActivity : ComponentActivity() {
             return
         }
         val session = synchronized(sessionLock) { builder.build(summary) }
+        val target = autosaveFile ?: sessionStore.newSessionFile().also { autosaveFile = it }
         ioExecutor.execute {
-            val saved = runCatching { sessionStore.save(session) }
+            // The same file the autosave has been writing — exporting shares it rather than
+            // producing a second, near-identical copy beside it.
+            val saved = runCatching { sessionStore.save(session, target) }
             runOnUiThread {
                 saved.onSuccess { file ->
                     lastSavedFile = file
@@ -493,6 +533,8 @@ class SessionActivity : ComponentActivity() {
     override fun onPause() {
         super.onPause()
         uiHandler.removeCallbacks(uiTick)
+        // Leaving the screen is exactly when a session would otherwise be lost.
+        autosave(force = true)
     }
 
     override fun onDestroy() {
@@ -516,6 +558,9 @@ class SessionActivity : ComponentActivity() {
 
         /** Above this the timeline halves its resolution rather than dropping the past. */
         const val TIMELINE_MAX_POINTS = 900
+
+        /** How often the session is written to storage while it runs. */
+        const val AUTOSAVE_INTERVAL_MS = 20_000L
 
         /**
          * How long the governor looks at before deciding anything.
