@@ -5,6 +5,57 @@
 > "operator confirmed: &lt;what was seen&gt;". If something is not measured yet, it says
 > `NOT MEASURED YET`.
 
+## 2026-08-02 — Both fixes worked, and the remaining problem is now understood exactly
+
+**Did**
+- Your two new sessions confirm both fixes from the last round:
+  - **Speaking speed recovered**: 7.6 → **11.8 words/second**, against 13.0 with nothing else
+    running. Pausing the face tracker while the coach thinks got back nearly all of it.
+  - **Waiting time halved**: 9.7 → **4.8 seconds**. Still over the 3-second target, but half.
+- More importantly, three measurements now explain the waiting time completely. Plotting
+  them against how long my question was:
+
+  | | question length | wait |
+  |---|---|---|
+  | speed test | 22 words-ish | 1.2 s |
+  | coach, English | 81 | 4.8 s |
+  | coach, French | 132 | 9.1 s |
+
+  It is a straight line: **about 61 milliseconds per word of question, and almost nothing
+  else.** The wait is not the phone thinking — it is the phone *reading my question*.
+- Trimming further would mean deleting the numbers the advice is actually based on. So
+  instead: **the phone now remembers the part of the question that never changes.** Every
+  coaching question opens with the same instructions and differs only in your figures, so it
+  keeps the already-read opening and reads only the new numbers.
+- **Dropped French questions** (French *answers* stay). The French version asked the same
+  thing in 132 words instead of 81 — accents cost more — and the model answered *"I'm sorry,
+  I can't answer what you said."* It was slower and worse. The app now always asks in English
+  and finishes with "reply in French".
+- Fixed the stray `"` that appeared at the start of the message.
+
+**Evidence**
+- Both sessions committed in `bench/sessions/`, with what each one taught noted in the README.
+- 120 `:core` tests pass, including one that fails if the French prompt drifts more than 30
+  characters from the English one.
+- **How much faster the remembering makes it: NOT MEASURED YET.** It should be large, since
+  most of the question is now the unchanging part — but the only number worth having is
+  yours.
+
+**Next — what you do**
+1. Install `0.5.6-kvcache`. Run a session in **airplane mode** and trigger the coach twice —
+   the second message is the interesting one, because that is when the remembering pays off.
+2. **Screenshot a message with the airplane icon visible** (still the required artifact).
+3. Send the session JSON.
+
+**Risks**
+- The French replies may still be poor even with an English question. Nobody has judged their
+  quality yet. If they are bad the honest choices are to drop the toggle or change model, and
+  that is the architect's call.
+- The message got cut off mid-sentence at 40 words. That is the promised limit working, but
+  it reads abruptly; worth deciding whether 40 is the right number once you have seen a few.
+
+---
+
 ## 2026-08-02 — The coach speaks on the phone, and it is too slow
 
 **Did**

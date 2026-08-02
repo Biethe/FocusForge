@@ -258,10 +258,19 @@ class CoachPromptTest {
     }
 
     @Test
-    fun `French asks for French`() {
-        val p = CoachPrompt.build(context(), CoachLanguage.FRENCH)
-        assertTrue(p.contains("Réponds en français"), p)
-        assertTrue(p.contains("42"), p)
+    fun `French asks for a French reply without paying for a French prompt`() {
+        val fr = CoachPrompt.build(context(), CoachLanguage.FRENCH)
+        val en = CoachPrompt.build(context(), CoachLanguage.ENGLISH)
+        assertTrue(fr.contains("in French"), "must ask for French output: $fr")
+        assertTrue(fr.contains("42"), fr)
+        // The instruction stays in English on purpose. Measured on the A20e: a fully French
+        // prompt tokenised to 132 tokens against 81, and at ~61 ms per prompt token that is
+        // three seconds of latency bought for nothing — it also produced a refusal.
+        assertTrue(
+            fr.length < en.length + 30,
+            "the French prompt is ${fr.length - en.length} chars longer than the English one; " +
+                "prompt length is TTFT on this device",
+        )
     }
 
     @Test

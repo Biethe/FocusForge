@@ -45,6 +45,12 @@ object LlamaBridge {
         val firstTokenId: Int = -1,
         val firstWasEndOfGeneration: Boolean = false,
         val usedChatTemplate: Boolean = false,
+        /**
+         * How many prompt tokens were served from the KV cache instead of being processed
+         * again. TTFT is almost entirely prompt processing on this device, so this is the
+         * number that explains a fast message.
+         */
+        val cachedPrefixTokens: Int = 0,
     ) {
         val tokensPerSecond: Double
             get() = if (decodeMs <= 0 || tokens <= 1) 0.0
@@ -107,7 +113,7 @@ object LlamaBridge {
             return failed("${e.javaClass.simpleName}: ${e.message}")
         }
         val f = packed.split(SEP)
-        if (f.size < 11) return failed("malformed native reply from generate")
+        if (f.size < 12) return failed("malformed native reply from generate")
         return Result(
             ok = f[0] == "1",
             error = f[1],
@@ -120,6 +126,7 @@ object LlamaBridge {
             firstTokenId = f[8].toIntOrNull() ?: -1,
             firstWasEndOfGeneration = f[9] == "1",
             usedChatTemplate = f[10] == "1",
+            cachedPrefixTokens = f[11].toIntOrNull() ?: 0,
         )
     }
 
@@ -149,6 +156,9 @@ object LlamaBridge {
 
     private fun failed(message: String) =
         Result(false, message, "", -1, -1, 0, -1)
+
+    /** Tokens actually processed for a generation, after cache reuse. */
+    fun Result.freshPromptTokens(): Int = (promptTokens - cachedPrefixTokens).coerceAtLeast(0)
 
     /** ASCII unit separator — the field delimiter the JNI layer packs with. */
     private const val SEP = '\u001F'

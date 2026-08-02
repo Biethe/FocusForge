@@ -250,14 +250,20 @@ object CoachPrompt {
                     "head ${fmt(context.headMovementDeg)} deg$blink, ${minutes} min in.\n" +
                     "${reason(context.trigger, language)}\n"
 
+            // French keeps the ENGLISH instruction and merely asks for French output.
+            // Measured on the A20e: a fully French prompt tokenised to 132 tokens against 81
+            // for the English one — accented text costs more tokens in this vocabulary — and
+            // at ~61 ms per prompt token that difference alone was 3 seconds of latency. It
+            // also produced a refusal ("je ne peux pas répondre"), so the longer prompt bought
+            // worse output as well as slower. See docs/DECISIONS.md 2026-08-02.
             CoachLanguage.FRENCH ->
-                "Encourage une personne qui étudie. Un seul message, $maxWords mots maximum, " +
-                    "tutoie-la, pas de liste. Réponds en français.\n" +
-                    "Dernières minutes : concentration ${context.recentMeanScore}/100, " +
-                    "regard sur le travail ${context.gazeOnScreenPercent}%, " +
-                    "${context.longClosures} fermetures des yeux prolongées, " +
-                    "tête ${fmt(context.headMovementDeg)} deg$blink, ${minutes} min écoulées.\n" +
-                    "${reason(context.trigger, language)}\n"
+                "Encourage someone studying. One message, max $maxWords words, speak to them " +
+                    "directly, no lists. Write your reply in French.\n" +
+                    "Last minutes: focus ${context.recentMeanScore}/100, " +
+                    "eyes on work ${context.gazeOnScreenPercent}%, " +
+                    "${context.longClosures} long eye closures, " +
+                    "head ${fmt(context.headMovementDeg)} deg$blink, ${minutes} min in.\n" +
+                    "${reason(context.trigger, CoachLanguage.ENGLISH)}\n"
         }
     }
 
@@ -282,7 +288,11 @@ object CoachPrompt {
      * rather than trusting the prompt keeps the UI's promise regardless of the model.
      */
     fun trimToWords(text: String, maxWords: Int = CoachThresholds.MAX_WORDS): String {
-        val cleaned = text.trim().replace(Regex("\\s+"), " ")
+        // Small models like to open with a stray quote or a leading colon, which then shows
+        // up in the UI as part of the advice. Observed on the A20e, 2026-08-02.
+        val cleaned = text.trim()
+            .removePrefix("\"").removePrefix("'").removePrefix(":").trim()
+            .replace(Regex("\\s+"), " ")
         val words = cleaned.split(' ').filter { it.isNotEmpty() }
         if (words.size <= maxWords) return cleaned
         return words.take(maxWords).joinToString(" ").trimEnd(',', ';', ':') + "…"

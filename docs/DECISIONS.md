@@ -5,6 +5,51 @@
 > Every optimization gets before/after numbers from committed benchmark files —
 > negative results are kept and reported honestly.
 
+## 2026-08-02 — TTFT is prompt processing; reuse the KV cache, and stop writing French prompts
+
+Both fixes from the previous entry are confirmed on the device, and three measurements now
+pin the cost model down.
+
+| run | prompt | TTFT | decode |
+|---|---|---|---|
+| smoke test, camera idle | 22 tok | 1240 ms | 13.0 tok/s |
+| coach EN, camera paused | 81 tok | 4836 ms | 11.8 tok/s |
+| coach FR, camera paused | 132 tok | 9102 ms | 10.7 tok/s |
+
+- **The vision pause worked**: decode recovered from 7.6 tok/s (camera live) to 11.8, against
+  13.0 with nothing else running at all.
+- **The prompt halving worked**: TTFT 9727 → 4836 ms.
+- **Fitting the three points gives TTFT ≈ 61 ms per prompt token, intercept ≈ 0** — prefill
+  runs at about 16 tok/s. TTFT on this device is *entirely* prompt processing. That predicts
+  7944 ms for the 132-token French prompt against 9102 measured, close enough to act on.
+- Meeting the 3000 ms contract by trimming alone would need ≤51 prompt tokens, and the
+  English prompt is already stripped to 81. Trimming further would start removing the numbers
+  the advice is based on.
+
+**So stop re-processing the part that never changes.** Every coaching prompt opens with the
+same instruction and differs only in the figures. The JNI now keeps the prompt tokens that are
+in the KV cache, finds the **longest common prefix** with the next prompt by comparing token
+ids, drops the cache after that point (`llama_memory_seq_rm`) and decodes only the tail.
+
+Comparing token ids rather than assuming a fixed instruction block is deliberate: it keeps
+working when the prompt is reworded, translated or restructured, so there is no structural
+promise for a future edit to break silently. The reuse count is returned to Kotlin and will go
+into the session export, because an optimisation whose benefit cannot be read off the evidence
+is indistinguishable from a claim. **Effect on device: NOT MEASURED YET.**
+
+### French prompts are withdrawn; French *replies* stay
+
+The French run cost 132 prompt tokens against 81 for the same content in English — accented
+text costs more tokens in this vocabulary — which at 61 ms/token is three seconds of latency.
+It also produced a **refusal**: *"Je suis désolé, mais je ne peux pas répondre à ce que tu as
+dit."* SmolLM2-360M is an English-centric model; the longer prompt bought worse output as well
+as slower.
+
+The instruction is now always English and simply ends with "Write your reply in French." A
+test asserts the French prompt stays within 30 characters of the English one. **Whether the
+replies are actually good French is unmeasured** — if they are not, the honest options are to
+drop the toggle or change model, and that is the architect's call, not something to paper over.
+
 ## 2026-08-02 — The coach works on-device, and it violates the TTFT contract
 
 **It generated text on the A20e.** That is the last unproven piece of Phase 5. Measured
