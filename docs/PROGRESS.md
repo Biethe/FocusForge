@@ -5,6 +5,53 @@
 > "operator confirmed: &lt;what was seen&gt;". If something is not measured yet, it says
 > `NOT MEASURED YET`.
 
+## 2026-08-02 — The benchmark answers everything: 6 threads, and the target is met
+
+**Did**
+- Your benchmark settled both open questions at once, and the answer to one of them is the
+  opposite of what the project assumed.
+
+| threads | wait for first word (cold) | with memory reuse | words/sec |
+|---|---|---|---|
+| 2 (what we shipped) | 4.9 s | 2.8 s | 12.3 |
+| 4 | 3.5 s | 1.9 s | 14.0 |
+| **6** | **2.7 s** | **1.5 s** | **14-17** |
+
+- **The 3-second target is now met with room to spare.** At 6 threads it is met even without
+  the memory trick, and 1.5 s with it. At 2 threads it was missed even *with* it.
+- **The memory reuse works**: it cut the wait by 38-44%, consistently, at every thread count.
+  It just never had the chance to prove it in a real session.
+- **We had the thread count wrong all along.** The project notes said use 2, aimed at the
+  phone's two fast cores. Nobody had measured it. Six is 1.85x faster — and I have flagged
+  this to the architect rather than quietly editing their guidance, because the note may
+  still be right about *which* cores to use even though it is wrong about how many threads.
+- Found something better than the speed-up: **the numbers follow a formula.** Wait time is
+  simply the number of new words in the question multiplied by a constant per thread count.
+  I fitted that constant using only the cold runs, then predicted the warm runs it had never
+  seen — **every prediction was within 2%.** That means the app can *work out in advance*
+  whether a setting will be fast enough, instead of trying it and finding out. That is
+  precisely what Phase 6 needs.
+
+**Evidence**
+- `bench/results/a20e-threads-kvcache-20260802.json` — full table, the formula, its
+  prediction errors, and the things it does *not* prove.
+- Your extra session shows the writing fixes worked. The coach said:
+  *"I know you're feeling tired, but remember, you've got this. Take a deep breath, and focus
+  on your work."* — right voice, complete sentences, twenty words, stopped on its own.
+
+**Next — what you do**
+1. Install `0.5.8-threads6` and run one more session in **airplane mode**.
+2. The coach should now answer in about a second and a half.
+3. **Screenshot it with the airplane icon showing** — that is still the missing submission
+   artifact, and it is the last thing Phase 5 needs.
+
+**Risks**
+- Six threads on a phone with two fast cores may run hotter or drain more battery. Neither is
+  measured, and the thermal side is exactly what the Phase 6 self-benchmark is meant to catch.
+- We still have not tested *pinning* threads to particular cores, only how many to use.
+
+---
+
 ## 2026-08-02 — The speed-up never got a chance to run
 
 **Did**

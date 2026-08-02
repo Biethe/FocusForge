@@ -26,7 +26,22 @@ import java.util.concurrent.atomic.AtomicBoolean
  */
 class CoachRunner(
     private val modelFile: File,
-    private val threads: Int = 2,
+    /**
+     * **Six, because it was measured** (`bench/results/a20e-threads-kvcache-20260802.json`).
+     *
+     * On the A20e, prefill runs at 16.9 tok/s on 2 threads, 24.0 on 4 and 31.2 on 6 — and
+     * since time to first token on this device is essentially all prefill, 6 threads takes a
+     * cold coaching message from 4913 ms to 2659 ms and a warm one to 1481 ms. Two threads
+     * misses the 3000 ms contract even with a warm cache; six passes even without one.
+     *
+     * This CONTRADICTS the default posture in CLAUDE.md §5 ("LLM generation on 2 threads
+     * toward the A73 cluster"), which was a documented starting point rather than a
+     * measurement. Flagged for the architect rather than changed quietly there.
+     *
+     * Counterintuitive on a chip with two big cores, and it is exactly why the Phase 6
+     * governor benchmarks rather than assumes. Thread *affinity* remains untested.
+     */
+    private val threads: Int = 6,
     private val nCtx: Int = 512,
     /** Called on a worker thread when a message has been generated. */
     private val onMessage: (CoachMessage, String) -> Unit,

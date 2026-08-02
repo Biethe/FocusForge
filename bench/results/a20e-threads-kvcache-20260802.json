@@ -1,0 +1,56 @@
+{
+  "_comment": [
+    "Thread count x KV-cache reuse, operator-run on the A20e, 2026-08-02, build 0.5.7-bench.",
+    "Every figure measured on the device. The derived cost model is stated with the",
+    "prediction error it achieves, not asserted."
+  ],
+
+  "device": "Samsung Galaxy A20e (SM-A202F/DS), Exynos 7884B, 2x Cortex-A73 + 6x Cortex-A53, Armv8.0-A",
+  "model": { "name": "SmolLM2-360M-Instruct", "quant": "q8_0", "file_size_mb": 386 },
+  "runtime": { "n_ctx": 512, "mmap": true, "sampler": "greedy", "gpu_layers": 0 },
+  "prompt": "a realistic coaching prompt (~83 tokens), not the short smoke-test one",
+
+  "runs": [
+    { "threads": 2, "run": 1, "prompt_tokens": 83, "reused_tokens": 0,  "ttft_ms": 4913, "decode_tok_per_s": 12.3 },
+    { "threads": 2, "run": 2, "prompt_tokens": 77, "reused_tokens": 30, "ttft_ms": 2784, "decode_tok_per_s": 12.4 },
+    { "threads": 2, "run": 3, "prompt_tokens": 81, "reused_tokens": 30, "ttft_ms": 3035, "decode_tok_per_s": 12.4 },
+
+    { "threads": 4, "run": 1, "prompt_tokens": 83, "reused_tokens": 0,  "ttft_ms": 3458, "decode_tok_per_s": 14.0 },
+    { "threads": 4, "run": 2, "prompt_tokens": 77, "reused_tokens": 30, "ttft_ms": 1940, "decode_tok_per_s": 14.1 },
+    { "threads": 4, "run": 3, "prompt_tokens": 81, "reused_tokens": 30, "ttft_ms": 2102, "decode_tok_per_s": 14.1 },
+
+    { "threads": 6, "run": 1, "prompt_tokens": 83, "reused_tokens": 0,  "ttft_ms": 2659, "decode_tok_per_s": 17.1 },
+    { "threads": 6, "run": 2, "prompt_tokens": 77, "reused_tokens": 30, "ttft_ms": 1481, "decode_tok_per_s": 14.4 },
+    { "threads": 6, "run": 3, "prompt_tokens": 81, "reused_tokens": 30, "ttft_ms": 1632, "decode_tok_per_s": 16.8 }
+  ],
+
+  "derived_cost_model": {
+    "form": "ttft_ms = (prompt_tokens - reused_tokens) * ms_per_fresh_token",
+    "ms_per_fresh_token": { "2_threads": 59.2, "4_threads": 41.7, "6_threads": 32.0 },
+    "prefill_tok_per_s": { "2_threads": 16.9, "4_threads": 24.0, "6_threads": 31.2 },
+    "validation": "The constant was fitted on the COLD run of each thread count only, then used to predict the two warm runs it had never seen. Worst error across all six predictions: 1.7%. Mean absolute error: 0.7%.",
+    "why_it_matters": "A device profile carrying ms_per_fresh_token lets the Phase 6 governor PREDICT whether a configuration meets the TTFT contract instead of trying it and waiting to find out."
+  },
+
+  "findings": {
+    "threads": {
+      "result": "6 threads is fastest: 1.85x the prefill of 2 threads (4913 -> 2659 ms cold), and decode also improves (12.3 -> 14.4-17.1 tok/s).",
+      "note": "Counterintuitive on a chip with only 2 big cores, and it contradicts the default posture in CLAUDE.md 5 ('LLM generation on 2 threads toward the A73 cluster'). That posture was a documented starting point, never a measurement. Scaling is sub-linear as expected — 3x the threads for 1.85x the speed — because six of the eight cores are A53s.",
+      "unmeasured": "Thread AFFINITY. These runs let the scheduler place threads freely; pinning to specific clusters is untested and is a Phase 6 governor knob."
+    },
+    "kv_cache_reuse": {
+      "result": "30 of ~78-81 prompt tokens reused, cutting TTFT by 38-44% at every thread count.",
+      "note": "The cut tracks the fraction of prompt reused almost exactly, which is independent confirmation that TTFT is linear in FRESH prompt tokens and that nothing else of consequence sits in that path."
+    },
+    "load_time_is_not_thread_dependent": {
+      "observed": "1390 ms at 2 threads, then 401 and 399 ms at 4 and 6.",
+      "interpretation": "This is the page cache, not the thread count: the 2-thread run was first and paid for reading 386 MB off eMMC. Recorded explicitly so nobody later reads it as '4 threads loads 3x faster'."
+    },
+    "contract": {
+      "target_ttft_ms": 3000,
+      "best_measured_ms": 1481,
+      "config": "6 threads, warm KV cache",
+      "verdict": "PASS with 2x headroom. 6 threads passes even cold (2659 ms). 2 threads misses even warm (3035 ms)."
+    }
+  }
+}

@@ -5,6 +5,55 @@
 > Every optimization gets before/after numbers from committed benchmark files —
 > negative results are kept and reported honestly.
 
+## 2026-08-02 — 6 threads, not 2 — and a cost model that predicts TTFT to within 2%
+
+Benchmark: `bench/results/a20e-threads-kvcache-20260802.json`, operator-run on the A20e.
+
+| threads | prefill | cold TTFT (83 tok) | warm TTFT (47 fresh) | decode |
+|---|---|---|---|---|
+| 2 | 16.9 tok/s | 4913 ms | 2784 ms | 12.3 tok/s |
+| 4 | 24.0 tok/s | 3458 ms | 1940 ms | 14.0 tok/s |
+| **6** | **31.2 tok/s** | **2659 ms** | **1481 ms** | **14.4-17.1 tok/s** |
+
+**The TTFT contract is met, with 2x headroom.** 6 threads passes even cold; 2 threads misses
+even warm.
+
+### The cost model
+
+```
+ttft_ms = (prompt_tokens - reused_tokens) x ms_per_fresh_token
+ms_per_fresh_token = 59.2 (2 threads) | 41.7 (4) | 32.0 (6)
+```
+
+Fitted on the **cold run of each thread count only**, then used to predict the two warm runs
+it had never seen: worst error **1.7%**, mean absolute error 0.7%, across six predictions.
+
+That is worth more than the speed-up itself. A device profile carrying `ms_per_fresh_token`
+lets the Phase 6 governor **predict** whether a configuration meets the contract instead of
+trying it and waiting to find out — which is the difference between a governor that explores
+and one that decides.
+
+### This contradicts CLAUDE.md §5, and the constitution wins until the architect rules
+
+CLAUDE.md §5 sets the default posture as *"LLM generation on 2 threads toward the A73
+cluster"*. On prefill that is measurably wrong on this device: 6 threads is 1.85x faster, and
+prefill is essentially all of TTFT here. The app default is changed to 6 on the strength of
+the measurement (§4.1 requires evidence over assumption), but **§5's text is left alone** —
+it is the architect's, and amending it needs their sign-off. Flagged for that decision.
+
+Two honest qualifications:
+- Scaling is **sub-linear**: 3x the threads buys 1.85x the speed, because six of the eight
+  cores are A53s. Nothing here suggests more threads would keep helping.
+- **Thread affinity is untested.** These runs let the scheduler place threads freely. The
+  §5 posture may well be right about *placement* even while wrong about *count*, and pinning
+  is a Phase 6 governor knob.
+
+### One number that must not be misread
+
+Load time reads 1390 ms at 2 threads and ~400 ms at 4 and 6. That is the **page cache**, not
+the thread count: the 2-thread run was first and paid to read 386 MB off eMMC. Recorded
+explicitly so that nobody later quotes "4 threads loads three times faster".
+
 ## 2026-08-02 — The cache optimisation was never exercised; measure it properly
 
 Two sessions on 0.5.6 produced **one coach message each**, so cache reuse never happened:

@@ -37,3 +37,6 @@ obj/
 # --- OS noise ---
 .DS_Store
 Thumbs.db
+
+# Windows "downloaded from the internet" metadata, created when files are copied from the phone via WSL
+*:Zone.Identifier

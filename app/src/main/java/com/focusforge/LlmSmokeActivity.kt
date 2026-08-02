@@ -316,10 +316,10 @@ class LlmSmokeActivity : Activity() {
         /** A second, different prompt so run 2 cannot be answered from a cached anything. */
         const val PROMPT_2 = "Give one short tip for resting your eyes during a long study session."
 
-        // The A20e has 2x A73 + 6x A53. Two threads is the documented starting point
-        // (CLAUDE.md §5); the Phase 6 governor will replace this constant with a measured
-        // choice per cluster.
-        const val THREADS = 2
+        // Measured, not assumed: 6 threads gives 1.85x the prefill of 2 on this device
+        // (bench/results/a20e-threads-kvcache-20260802.json). The Phase 6 governor will
+        // derive this per device instead of carrying a constant at all.
+        const val THREADS = 6
         const val N_CTX = 512
         const val MAX_TOKENS = 20
         const val RSS_BUDGET_MB = 700.0
