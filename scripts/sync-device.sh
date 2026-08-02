@@ -148,18 +148,28 @@ echo "Staging screenshots from the last $SHOT_DAYS days into $SHOT_STAGING (NOT 
 SHOTS="$("$ADB" -s "$ADDR" shell "find /sdcard/Pictures/Screenshots /sdcard/DCIM/Screenshots \
     -maxdepth 1 -type f -mtime -$SHOT_DAYS 2>/dev/null" \
     | tr -d '\r' | grep -iE '\.(png|jpg)$' | xargs -r -n1 basename || true)"
+# Report "already have them" distinctly from "there are none". The first version printed
+# nothing at all when every screenshot was already staged, which reads as "found none" and
+# sent the builder hunting for a bug that did not exist.
 if [ -z "$SHOTS" ]; then
-    echo "  none found"
+    echo "  none in the last $SHOT_DAYS days"
 else
+    shot_new=0
+    shot_have=0
     for dir in /sdcard/Pictures/Screenshots /sdcard/DCIM/Screenshots; do
         while IFS= read -r name; do
             [ -z "$name" ] && continue
-            [ -f "$SHOT_STAGING/$name" ] && continue
+            if [ -f "$SHOT_STAGING/$name" ]; then
+                shot_have=$((shot_have + 1))
+                continue
+            fi
             if "$ADB" -s "$ADDR" pull -a "$dir/$name" "$SHOT_STAGING/$name" >/dev/null 2>&1; then
                 echo "    + $name"
+                shot_new=$((shot_new + 1))
             fi
         done <<< "$SHOTS"
     done
+    echo "  screenshots: $shot_new new, $shot_have already staged"
 fi
 
 echo

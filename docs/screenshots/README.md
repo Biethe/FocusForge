@@ -3,6 +3,12 @@
 Proof artifacts for the Arm AI Optimization Challenge entry. Each one exists to make a
 specific claim checkable by a judge who cannot run the app.
 
+**Committed so far**: `airplane-coach.jpg` and `session-distracted.jpg`, both from
+2026-08-02. Two other screenshots from the same evening were pulled and **deliberately not
+committed** — the Session screen had not scrolled in those, so the camera preview, and the
+operator's face, are in frame. The two that are here happen to be face-free because the
+screen was scrolled past the preview when they were taken; nothing was cropped.
+
 | file | what it has to show | why it matters |
 |---|---|---|
 | `airplane-coach.png` | A coaching message on the Session screen **with the airplane-mode icon visible in the status bar**, and the measured TTFT / tok-s beside it | The core claim of the whole project: a language model wrote this on the device, with every radio off. Without the status bar in frame it proves nothing. |

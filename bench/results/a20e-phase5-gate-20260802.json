@@ -1,19 +1,17 @@
 {
   "_comment": [
-    "Phase 5 decision gate — operator-run on the physical device, 2026-08-02.",
+    "Phase 5 decision gate \u2014 operator-run on the physical device, 2026-08-02.",
     "Reported by the operator from the LLM smoke-test screen of build 0.5.2-warm-ttft.",
     "Every figure here was measured on the phone. Nothing is estimated or scaled.",
     "The one derived value (model_load_ms) is marked as inferred and says so."
   ],
-
   "device": {
     "model": "Samsung Galaxy A20e (SM-A202F/DS)",
     "soc": "Exynos 7884B",
-    "isa": "Armv8.0-A, NEON only — no dotprod, no i8mm, no SVE, no LSE atomics",
+    "isa": "Armv8.0-A, NEON only \u2014 no dotprod, no i8mm, no SVE, no LSE atomics",
     "clusters": "2x Cortex-A73 @ ~1.6 GHz + 6x Cortex-A53 @ ~1.35 GHz",
     "ram_total_gb": 3
   },
-
   "build": {
     "app_version": "0.5.2-warm-ttft",
     "llama_cpp_tag": "b10227",
@@ -22,14 +20,12 @@
     "march": "armv8-a",
     "ggml_flags": "GGML_NATIVE=OFF, GGML_CPU_ARM_ARCH=armv8-a, ALL_VARIANTS=OFF, KLEIDIAI=OFF, OPENMP=OFF, LLAMAFILE=OFF"
   },
-
   "model": {
     "name": "SmolLM2-360M-Instruct",
     "quant": "q8_0",
     "file_size_mb": 386,
-    "note": "NOT the shipping quant. The official HuggingFaceTB repo publishes only q8_0; the shipping model is Q4_K_M at 271 MB. Every number below is therefore a FLOOR — the shipping quant moves fewer weight bytes per token on a bandwidth-limited CPU."
+    "note": "NOT the shipping quant. The official HuggingFaceTB repo publishes only q8_0; the shipping model is Q4_K_M at 271 MB. Every number below is therefore a FLOOR \u2014 the shipping quant moves fewer weight bytes per token on a bandwidth-limited CPU."
   },
-
   "runtime_config": {
     "threads": 2,
     "n_ctx": 512,
@@ -38,10 +34,9 @@
     "sampler": "greedy",
     "gpu_layers": 0
   },
-
   "runs": [
     {
-      "label": "run 1 (cold — first generation after load)",
+      "label": "run 1 (cold \u2014 first generation after load)",
       "prompt_tokens": 21,
       "ttft_ms": 1240,
       "tokens": 20,
@@ -49,7 +44,7 @@
       "decode_tok_per_s": 13.0
     },
     {
-      "label": "run 2 (warm — same open model, different prompt)",
+      "label": "run 2 (warm \u2014 same open model, different prompt)",
       "prompt_tokens": 23,
       "ttft_ms": 1323,
       "tokens": 20,
@@ -57,7 +52,6 @@
       "decode_tok_per_s": 12.9
     }
   ],
-
   "memory_rss_mb": {
     "before_model_open": 133,
     "after_model_load": 554,
@@ -67,25 +61,38 @@
     "model_cost_mb": 421,
     "_note": "421 MB for a 386 MB file = the mmapped weights fully faulted in, plus ~35 MB of context, KV cache and compute buffers at n_ctx 512."
   },
-
   "contract_check": {
-    "ttft_ms": { "target": "<= 3000", "measured": 1240, "verdict": "PASS", "headroom": "2.4x" },
-    "decode_tok_per_s": { "target": ">= 5", "measured": 13.0, "verdict": "PASS", "headroom": "2.6x" },
-    "rss_mb": { "target": "<= 700", "measured": 557, "verdict": "PASS", "headroom": "143 MB" }
-  },
-
-  "inferred_not_measured": {
-    "model_load_ms": {
-      "value": "~1900",
-      "basis": "cold-start figure of 3149 ms from build 0.5.1 (which timed from before llama_model_load_from_file) minus the 1240 ms warm TTFT measured here",
-      "status": "INFERRED — the operator did not report the MODEL LOAD line directly. Replace with the measured value at the next opportunity."
+    "ttft_ms": {
+      "target": "<= 3000",
+      "measured": 1240,
+      "verdict": "PASS",
+      "headroom": "2.4x"
+    },
+    "decode_tok_per_s": {
+      "target": ">= 5",
+      "measured": 13.0,
+      "verdict": "PASS",
+      "headroom": "2.6x"
+    },
+    "rss_mb": {
+      "target": "<= 700",
+      "measured": 557,
+      "verdict": "PASS",
+      "headroom": "143 MB"
     }
   },
-
+  "inferred_not_measured": {
+    "model_load_ms": {
+      "value": 3005,
+      "status": "NOW MEASURED \u2014 superseded the earlier inference",
+      "source": "Session screen, 2026-08-02 15:57: 'coach ready (model loaded in 3005 ms)'",
+      "note": "The earlier value of ~1900 ms was inferred by subtracting a warm TTFT from a cold-start figure. It was 37% low. Recorded because an inference that survives unchallenged next to measured numbers starts to look like one of them."
+    }
+  },
   "open_risk": {
     "concurrent_camera_and_model": {
       "problem": "This 557 MB was measured with the camera pipeline NOT running. A real session runs CameraX plus MediaPipe FaceLandmarker at the same time as the model. Their memory adds on top of the 133 MB baseline, not into it.",
-      "status": "NOT MEASURED YET — the camera-screen RSS has been outstanding since Phase 2.",
+      "status": "NOT MEASURED YET \u2014 the camera-screen RSS has been outstanding since Phase 2.",
       "consequence_if_large": "With q8_0 the sum could reach or exceed the 700 MB budget. Q4_K_M saves ~115 MB and may be required rather than merely preferred."
     }
   }
