@@ -63,6 +63,18 @@ data class CoachConfig(
 /** Why the coach spoke. Recorded with every message so the log explains itself. */
 enum class CoachTrigger { FATIGUE, LOW_FOCUS, MILESTONE }
 
+/**
+ * The language the coach replies in.
+ *
+ * **FRENCH is not offered in the app.** The prompt machinery works and is tested, but
+ * SmolLM2-360M is an English-centric model and the operator judged its French replies bad on
+ * 2026-08-02 — an earlier attempt with a fully French prompt produced an outright refusal
+ * ("je ne peux pas répondre à ce que tu as dit") and cost 60% more prompt tokens for it.
+ *
+ * Kept rather than deleted because the mechanism is not what failed: a model with real French
+ * would work through this path unchanged. Shipping the toggle anyway would mean offering a
+ * feature we know produces poor output, which is worse than not offering it.
+ */
 enum class CoachLanguage { ENGLISH, FRENCH }
 
 /** What the coach is told about the last few minutes. Numbers only. */

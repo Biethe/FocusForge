@@ -181,14 +181,19 @@ object ProfileDeriver {
                 availableModels.firstOrNull()
             }
             else -> {
-                // Smaller quantisations move fewer bytes per token, which is what matters on a
-                // bandwidth-limited CPU — but this has not been measured across files, so the
-                // choice is named as a preference rather than a result.
+                // Still a preference, and now one with a warning attached. Measured on the
+                // A20e (docs/RESULTS.md §1): Q4_K_M is 19-35% SLOWER than q8_0 despite being
+                // 115 MB smaller, because unpacking a k-quant costs arithmetic that a CPU
+                // with dotprod would hide behind its matrix multiply — and Armv8.0 has none.
+                // Smaller is cheaper in memory and load time, not necessarily in latency.
                 val pick = availableModels.minByOrNull { it.length }
                 reasons += ChoiceReason("modelFile", pick ?: "unchanged",
-                    "chosen from ${availableModels.size} available files. NOT a measured " +
-                        "comparison: no benchmark has been run across quantisations, so this " +
-                        "is a preference for the smaller file, not evidence")
+                    "chosen from ${availableModels.size} available files by NAME LENGTH, which " +
+                        "is a proxy for a smaller quantisation and NOT a measurement. Be " +
+                        "careful with the assumption behind it: on Armv8.0 hardware a smaller " +
+                        "k-quant measured 19-35% slower than q8_0, because unpacking it costs " +
+                        "arithmetic that dotprod would otherwise hide. Smaller reliably buys " +
+                        "memory and load time; it does not reliably buy speed")
                 pick
             }
         }

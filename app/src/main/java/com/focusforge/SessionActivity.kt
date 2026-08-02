@@ -61,7 +61,7 @@ class SessionActivity : ComponentActivity() {
     private lateinit var summaryText: TextView
     private lateinit var exportButton: Button
     private lateinit var coachText: TextView
-    private lateinit var languageButton: Button
+    private lateinit var languageButton: TextView
 
     private val perf = PerfMonitor()
     private val uiHandler = Handler(Looper.getMainLooper())
@@ -178,14 +178,14 @@ class SessionActivity : ComponentActivity() {
             setBackgroundColor(Color.parseColor("#11000000"))
             text = "coach — starting…"
         }
-        languageButton = Button(this).apply {
-            text = "Coach: English"
-            setOnClickListener {
-                val next = if (coach?.language == CoachLanguage.FRENCH) CoachLanguage.ENGLISH
-                           else CoachLanguage.FRENCH
-                coach?.language = next
-                text = if (next == CoachLanguage.FRENCH) "Coach : français" else "Coach: English"
-            }
+        // The French toggle was removed on 2026-08-02: the operator judged the replies bad,
+        // and SmolLM2-360M is an English-centric model. The code path is still in :core and
+        // still tested — a model with real French would work through it unchanged — but
+        // offering a feature we know produces poor output is worse than not offering it.
+        languageButton = TextView(this).apply {
+            textSize = 12f
+            setPadding(pad, 0, pad, 0)
+            text = "coach replies in English (French withdrawn — see docs/SIGNALS.md)"
         }
 
         val root = LinearLayout(this).apply {
