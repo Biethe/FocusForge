@@ -169,13 +169,17 @@ class LlmSmokeActivity : Activity() {
         appendLine("FocusForge LLM smoke test — ${if (r.ok) "PASS" else "FAIL"}")
         appendLine(LlamaBridge.buildInfo())
         appendLine("threads=$THREADS  n_ctx=$N_CTX  max_tokens=$MAX_TOKENS  mmap=yes")
+        appendLine("prompt=${r.promptTokens} tokens  chat template=${if (r.usedChatTemplate) "applied" else "NOT APPLIED"}")
         appendLine()
         if (!r.ok) {
             appendLine("ERROR: ${r.error}")
             appendLine()
-            appendLine("If the app died instead of showing this, the crash is almost")
-            appendLine("certainly SIGILL — an instruction this CPU does not have. That")
-            appendLine("is a compile-flag problem, not a model problem (CLAUDE.md §2).")
+            appendLine("first sampled token id: ${r.firstTokenId}" +
+                if (r.firstWasEndOfGeneration) "  (end-of-generation)" else "")
+            appendLine()
+            appendLine("Note: reaching this screen at all means the native library")
+            appendLine("loaded and ran — so this is NOT the illegal-instruction failure")
+            appendLine("we were worried about. That risk is retired.")
             return@buildString
         }
         appendLine("--- generated text ---")

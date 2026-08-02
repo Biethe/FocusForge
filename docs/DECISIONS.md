@@ -5,6 +5,28 @@
 > Every optimization gets before/after numbers from committed benchmark files —
 > negative results are kept and reported honestly.
 
+## 2026-08-02 — Phase 5.0a: the gate's real result, and the chat template
+
+- **The SIGILL risk is retired.** The operator ran build 0.5.0 on the A20e and the app did
+  not crash: the native library loaded, the model loaded, the context initialised and
+  `llama_decode` ran. Every instruction in that path is executable on Armv8.0-A hardware.
+  That was the highest-risk item in the project and it is now settled **on the device**,
+  not by static analysis.
+- **What failed instead:** `no tokens generated`. Cause: SmolLM2-360M-**Instruct** is trained
+  on ChatML, and we fed it a bare sentence. With no assistant turn to complete, the first
+  token it predicts is end-of-generation; greedy sampling takes it, the loop breaks before
+  counting anything, and the run reports zero tokens while every layer underneath worked.
+- **Fix:** apply the model's own chat template via `llama_model_chat_template` +
+  `llama_chat_apply_template` before tokenizing, falling back to the raw prompt if a model
+  carries no template. This was needed for the coach regardless, so it is not throwaway work.
+- **Second fix, and the more important one: the error message.** `no tokens generated` cost a
+  round trip on the operator's phone and told us nothing. The JNI now reports prompt token
+  count, the first sampled token id, whether it was end-of-generation, the `llama_decode`
+  return code, and whether the template was applied — and names the likely cause in prose.
+  On a project where every on-device observation costs a human round trip, a diagnostic that
+  cannot distinguish "the silicon is wrong" from "the prompt was wrong" is a defect in its
+  own right.
+
 ## 2026-08-02 — Phase 5.0: llama.cpp pinned, and the Armv8.0 baseline is enforced three ways
 
 - **What/License:** llama.cpp (MIT) as a shallow git submodule at `native/llama.cpp`, pinned

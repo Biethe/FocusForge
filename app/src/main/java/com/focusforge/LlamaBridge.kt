@@ -27,6 +27,11 @@ object LlamaBridge {
         val rssAfterLoadBytes: Long,
         /** ...and again after the first generation (architect amendment 2). */
         val rssAfterGenBytes: Long,
+        /** Diagnostics, so a failure is readable from the screen rather than guessed at. */
+        val promptTokens: Int = 0,
+        val firstTokenId: Int = -1,
+        val firstWasEndOfGeneration: Boolean = false,
+        val usedChatTemplate: Boolean = false,
     ) {
         /** Decode tokens per second, excluding the prompt-processing time before TTFT. */
         val tokensPerSecond: Double
@@ -93,6 +98,10 @@ object LlamaBridge {
             tokens = f[5].toIntOrNull() ?: 0,
             rssAfterLoadBytes = f[6].toLongOrNull() ?: -1,
             rssAfterGenBytes = f[7].toLongOrNull() ?: -1,
+            promptTokens = f[8].toIntOrNull() ?: 0,
+            firstTokenId = f[9].toIntOrNull() ?: -1,
+            firstWasEndOfGeneration = f[10] == "1",
+            usedChatTemplate = f[11] == "1",
         )
     }
 

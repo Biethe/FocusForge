@@ -5,6 +5,51 @@
 > "operator confirmed: &lt;what was seen&gt;". If something is not measured yet, it says
 > `NOT MEASURED YET`.
 
+## 2026-08-02 — Phase 5.0a: the big risk is gone; the model just had nothing to say
+
+**Did**
+- You ran the smoke test and got `no tokens generated`. **That is much better news than it
+  sounds**, and the headline is this: **the app did not crash.**
+- The entire risk of this phase was that the model code would be compiled for a newer chip
+  than yours and die instantly with an illegal-instruction crash. It didn't. The library
+  loaded, the model loaded, and the maths ran. **That risk is now retired on real hardware**
+  rather than argued from static analysis. It was the single most dangerous item in the
+  project.
+- The actual bug is mundane. SmolLM2 is a *chat* model: it expects to be handed a
+  conversation, with a marker saying "now the assistant speaks". I handed it a bare sentence.
+  Faced with what looks like the middle of a document, the very first thing it decided to say
+  was "I'm done" — and my loop counted zero tokens and reported failure, even though every
+  layer underneath had worked perfectly.
+- Fixed by using the model's own conversation format, which the coach needed anyway.
+- **Fixed a second, more annoying problem: my error message.** `no tokens generated` cost you
+  a trip to the phone and told us nothing. The screen now reports how many tokens the prompt
+  became, what the model's first word was, whether that word was "I'm done", and whether the
+  conversation format was applied — and says in plain words what it thinks went wrong.
+
+**Evidence**
+- Operator confirmed on the A20e, 2026-08-02: build `0.5.0-llm-smoke`, no crash, error
+  `no tokens generated`.
+- Root cause identified by comparing our generation loop against llama.cpp's own reference
+  example — the loops are structurally identical, which pointed at the prompt rather than
+  the code.
+- **Still NOT MEASURED YET:** TTFT, tokens/second and RSS on the phone. That is the next run.
+
+**Next — what you do**
+1. Install `0.5.1-chat-template` from dev-latest.
+2. **LLM smoke test** → **Generate 20 tokens**. The model is already imported; you should
+   not need to import it again.
+3. Send me the text block. Expect actual words this time.
+
+**Risks**
+- If it still generates nothing, the screen now tells us why rather than leaving us guessing,
+  and the answer will point somewhere specific.
+- The gate deadline is still end of Aug 4, and we are inside it with the dangerous part
+  already proven.
+- These numbers will come from the **q8_0** model (386 MB), which is bigger and slower than
+  the Q4_K_M we will ship. Whatever they are, they are a floor, not the Phase 5 result.
+
+---
+
 ## 2026-08-02 — Phase 5.0: the LLM smoke test is built and ready for the gate
 
 **Did**

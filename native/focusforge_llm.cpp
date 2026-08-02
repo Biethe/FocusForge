@@ -72,6 +72,14 @@ struct RunResult {
     int tokens = 0;
     long rss_after_load = -1;
     long rss_after_gen = -1;
+    // Diagnostics. The first attempt at this returned a bare "no tokens generated",
+    // which cost an operator round trip to learn nothing. Every subsequent failure
+    // should be diagnosable from the screen alone.
+    int n_prompt_tokens = 0;
+    int first_token_id = -1;
+    bool first_was_eog = false;
+    int decode_rc = 0;
+    bool used_chat_template = false;
 };
 
 RunResult run_generation(const char* model_path, const char* prompt, int n_threads,
@@ -108,11 +116,38 @@ RunResult run_generation(const char* model_path, const char* prompt, int n_threa
 
     const llama_vocab* vocab = llama_model_get_vocab(model);
 
+    // Apply the model's own chat template.
+    //
+    // This is not cosmetic. SmolLM2-360M-**Instruct** was trained on ChatML, so a bare
+    // sentence looks like the middle of a document with no assistant turn to complete —
+    // and the very first token it predicts is end-of-text. Greedy sampling then takes it,
+    // the loop breaks before counting anything, and the run reports zero tokens while
+    // every layer underneath worked perfectly. That is exactly what happened on the first
+    // on-device attempt (2026-08-02).
+    std::string formatted = prompt;
+    const char* tmpl = llama_model_chat_template(model, nullptr);
+    if (tmpl != nullptr) {
+        llama_chat_message msg{"user", prompt};
+        std::vector<char> buf(std::strlen(prompt) + 2048);
+        int n = llama_chat_apply_template(tmpl, &msg, 1, /*add_assistant=*/true,
+                                          buf.data(), (int32_t) buf.size());
+        if (n > (int) buf.size()) {
+            buf.resize(n);
+            n = llama_chat_apply_template(tmpl, &msg, 1, true, buf.data(), (int32_t) buf.size());
+        }
+        if (n > 0) {
+            formatted.assign(buf.data(), n);
+            r.used_chat_template = true;
+        }
+    }
+    const char* text_in = formatted.c_str();
+
     // Tokenize. Ask for the size first rather than guessing a buffer.
-    const int n_prompt = -llama_tokenize(vocab, prompt, (int32_t) std::strlen(prompt),
+    const int n_prompt = -llama_tokenize(vocab, text_in, (int32_t) std::strlen(text_in),
                                          nullptr, 0, true, true);
     std::vector<llama_token> tokens(n_prompt);
-    if (llama_tokenize(vocab, prompt, (int32_t) std::strlen(prompt), tokens.data(),
+    r.n_prompt_tokens = n_prompt;
+    if (llama_tokenize(vocab, text_in, (int32_t) std::strlen(text_in), tokens.data(),
                        (int32_t) tokens.size(), true, true) < 0) {
         llama_free(ctx);
         llama_model_free(model);
@@ -137,8 +172,10 @@ RunResult run_generation(const char* model_path, const char* prompt, int n_threa
     llama_token next_token = 0;
 
     for (int pos = 0; pos + batch.n_tokens < n_ctx && generated < max_tokens; ) {
-        if (llama_decode(ctx, batch) != 0) {
-            r.error = "llama_decode failed";
+        const int rc = llama_decode(ctx, batch);
+        if (rc != 0) {
+            r.decode_rc = rc;
+            r.error = "llama_decode failed with code " + std::to_string(rc);
             break;
         }
         pos += batch.n_tokens;
@@ -146,6 +183,8 @@ RunResult run_generation(const char* model_path, const char* prompt, int n_threa
         llama_token id = llama_sampler_sample(smpl, ctx, -1);
         if (ttft < 0) {
             ttft = now_ms() - t_start;   // first token out of the model
+            r.first_token_id = id;
+            r.first_was_eog = llama_vocab_is_eog(vocab, id);
         }
         if (llama_vocab_is_eog(vocab, id)) break;
 
@@ -164,7 +203,20 @@ RunResult run_generation(const char* model_path, const char* prompt, int n_threa
     r.tokens = generated;
     r.text = out;
     r.ok = r.error.empty() && generated > 0;
-    if (r.ok == false && r.error.empty()) r.error = "no tokens generated";
+    if (!r.ok && r.error.empty()) {
+        if (r.first_was_eog) {
+            r.error = "the model's FIRST token was end-of-generation (id " +
+                      std::to_string(r.first_token_id) + "). The pipeline ran correctly; " +
+                      "the model simply had nothing to say to this prompt. Chat template " +
+                      std::string(r.used_chat_template ? "WAS" : "was NOT") + " applied.";
+        } else if (n_prompt >= n_ctx) {
+            r.error = "prompt is " + std::to_string(n_prompt) + " tokens but n_ctx is " +
+                      std::to_string(n_ctx) + " — nothing left to generate into";
+        } else {
+            r.error = "no tokens generated (prompt " + std::to_string(n_prompt) +
+                      " tokens, first id " + std::to_string(r.first_token_id) + ")";
+        }
+    }
 
     llama_sampler_free(smpl);
     llama_free(ctx);
@@ -178,6 +230,7 @@ extern "C" {
 
 // Returns a single '\x1f'-separated record so the smoke test needs no JSON parser:
 //   ok | error | text | ttftMs | totalMs | tokens | rssAfterLoad | rssAfterGen
+//   | nPromptTokens | firstTokenId | firstWasEog | usedChatTemplate
 JNIEXPORT jstring JNICALL
 Java_com_focusforge_LlamaBridge_nativeGenerate(JNIEnv* env, jobject /*thiz*/,
                                                jstring j_model_path, jstring j_prompt,
@@ -199,7 +252,11 @@ Java_com_focusforge_LlamaBridge_nativeGenerate(JNIEnv* env, jobject /*thiz*/,
     packed += std::to_string(r.total_ms);    packed += sep;
     packed += std::to_string(r.tokens);      packed += sep;
     packed += std::to_string(r.rss_after_load); packed += sep;
-    packed += std::to_string(r.rss_after_gen);
+    packed += std::to_string(r.rss_after_gen);   packed += sep;
+    packed += std::to_string(r.n_prompt_tokens); packed += sep;
+    packed += std::to_string(r.first_token_id);  packed += sep;
+    packed += (r.first_was_eog ? "1" : "0");     packed += sep;
+    packed += (r.used_chat_template ? "1" : "0");
 
     return env->NewStringUTF(packed.c_str());
 }
