@@ -57,6 +57,17 @@ class FacePipeline(
      */
     @Volatile var paused = false
 
+    /**
+     * Frames per second the detector may use, or null for "as fast as the camera delivers".
+     *
+     * This is the knob the Phase 6 governor turns. Frames above the budget are dropped
+     * before MediaPipe sees them, which is where the CPU actually goes — the camera itself
+     * keeps running, because stopping and restarting it costs more than it saves.
+     */
+    @Volatile var targetFps: Double? = null
+
+    private var lastProcessedMs = 0L
+
     /** Size of the upright frame actually handed to the detector. */
     @Volatile var analysisWidth = 0
         private set
@@ -125,6 +136,20 @@ class FacePipeline(
             // Close the proxy without doing any work: holding it would stall the camera.
             image.close()
             return
+        }
+        // Honour the governor's frame budget by dropping frames rather than by slowing the
+        // camera: a dropped frame costs nothing, whereas reconfiguring the capture session
+        // takes hundreds of milliseconds.
+        targetFps?.let { fps ->
+            if (fps > 0) {
+                val minGapMs = (1000.0 / fps).toLong()
+                val now = SystemClock.uptimeMillis()
+                if (now - lastProcessedMs < minGapMs) {
+                    image.close()
+                    return
+                }
+                lastProcessedMs = now
+            }
         }
         perf.onFrame()
         val buffer = bitmapBuffer ?: Bitmap.createBitmap(

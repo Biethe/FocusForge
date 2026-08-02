@@ -17,8 +17,8 @@ android {
         applicationId = "com.focusforge"
         minSdk = 28
         targetSdk = 34
-        versionCode = 17
-        versionName = "0.5.8-threads6"
+        versionCode = 18
+        versionName = "0.6.0-governor"
         ndk {
             // A20e is arm64-v8a only per CLAUDE.md; we never ship other ABIs.
             abiFilters += "arm64-v8a"
@@ -86,6 +86,9 @@ android {
 dependencies {
     // All signal logic lives in the pure-Kotlin :core module (CLAUDE.md §3).
     implementation(project(":core"))
+    // The self-tuning runtime. Pure Kotlin/JVM too — :app supplies the platform bits it
+    // cannot have (battery, thermal, the real inference backend) through its interfaces.
+    implementation(project(":governor"))
     // CameraX (Apache-2.0)
     val camerax = "1.3.4"
     implementation("androidx.camera:camera-core:$camerax")

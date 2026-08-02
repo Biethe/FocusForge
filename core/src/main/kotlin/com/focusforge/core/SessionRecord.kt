@@ -36,6 +36,17 @@ data class SessionRecording(
      * as bad as an unexplained governor decision.
      */
     val coachMessages: List<CoachMessage> = emptyList(),
+    /**
+     * What the self-tuning runtime changed during the session, and why.
+     *
+     * Kept as raw JSON so that `:core` does not have to depend on `:governor` — the export
+     * schema belongs to the app, and the governor is a library the app happens to use. The
+     * evidence rule applies to the governor as much as to anything else: a configuration
+     * change with no recorded trigger is a defect.
+     */
+    val governorDecisions: List<kotlinx.serialization.json.JsonElement> = emptyList(),
+    /** The device profile in force, embedded so a session explains its own configuration. */
+    val deviceProfile: kotlinx.serialization.json.JsonElement? = null,
 ) {
     companion object {
         const val SCHEMA_VERSION = 1
@@ -142,6 +153,8 @@ class SessionBuilder(
 ) {
     private val samples = ArrayList<SessionSample>()
     private val coachMessages = ArrayList<CoachMessage>()
+    private val governorDecisions = ArrayList<kotlinx.serialization.json.JsonElement>()
+    private var deviceProfile: kotlinx.serialization.json.JsonElement? = null
     private var firstTimestampMs: Long? = null
     private var lastKeptMs: Long? = null
     /** Frames seen since the last exported row, for that row's own effective frame rate. */
@@ -152,6 +165,16 @@ class SessionBuilder(
     /** Coaching messages are rare events, so they are kept whole rather than thinned. */
     fun addCoachMessage(message: CoachMessage) {
         coachMessages += message
+    }
+
+    /** @param json one serialised governor decision. */
+    fun addGovernorDecision(json: String) {
+        runCatching { Json.parseToJsonElement(json) }.getOrNull()?.let { governorDecisions += it }
+    }
+
+    /** @param json the serialised device profile the session ran under, if there is one. */
+    fun setDeviceProfile(json: String?) {
+        deviceProfile = json?.let { runCatching { Json.parseToJsonElement(it) }.getOrNull() }
     }
 
     fun add(snapshot: SignalSnapshot, state: FocusState) {
@@ -221,6 +244,8 @@ class SessionBuilder(
         ),
         samples = samples.toList(),
         coachMessages = coachMessages.toList(),
+        governorDecisions = governorDecisions.toList(),
+        deviceProfile = deviceProfile,
     )
 
     private fun validity(fps: Double): BlinkRateValidity =

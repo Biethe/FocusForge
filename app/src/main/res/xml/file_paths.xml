@@ -4,4 +4,5 @@
 <paths>
     <external-files-path name="replays" path="replays/" />
     <external-files-path name="sessions" path="sessions/" />
+    <external-files-path name="profiles" path="profiles/" />
 </paths>

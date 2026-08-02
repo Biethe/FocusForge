@@ -7,6 +7,7 @@ import android.graphics.Typeface
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.util.Log
 import android.view.Gravity
 import android.view.View
@@ -30,6 +31,11 @@ import com.focusforge.core.SessionBuilder
 import com.focusforge.core.SessionSummary
 import com.focusforge.core.SignalEngine
 import com.focusforge.core.SignalSnapshot
+import dev.aarchmage.DeviceProfile
+import dev.aarchmage.Governor
+import dev.aarchmage.GovernorDecision
+import dev.aarchmage.toJson
+import dev.aarchmage.WindowMeasurement
 import java.io.File
 import java.util.Locale
 import java.util.concurrent.ExecutorService
@@ -81,6 +87,16 @@ class SessionActivity : ComponentActivity() {
     // is thread-safe, and a display that is at most one second stale is free.
     @Volatile private var latestSummary: SessionSummary? = null
     private var lastSavedFile: File? = null
+
+    // --- governor ---------------------------------------------------------------
+    // Only present once the device has been profiled. Without a profile there is nothing to
+    // govern against, and inventing a configuration would defeat the point of measuring one.
+    private var governor: Governor? = null
+    private var deviceProfile: DeviceProfile? = null
+    @Volatile private var governorLine: String = ""
+    private val governorLog = mutableListOf<GovernorDecision>()   // guarded by sessionLock
+    private var windowStartedMs = 0L
+    private var windowFrames = 0
 
     // --- coach -----------------------------------------------------------------
     private var coach: CoachRunner? = null
@@ -210,6 +226,73 @@ class SessionActivity : ComponentActivity() {
         }
     }
 
+    /**
+     * Puts the device profile in charge, if one has been measured.
+     *
+     * The profile decides how many threads the coach gets and what frame budget the vision
+     * loop starts with; the governor then holds both to the contract while the session runs.
+     */
+    private fun startGovernor() {
+        val profile = ProfileStore(this).load()
+        deviceProfile = profile
+        if (profile == null) {
+            governorLine = "no device profile — run the self-benchmark on the LLM screen"
+            return
+        }
+        governor = Governor(profile)
+        synchronized(sessionLock) { sessionBuilder?.setDeviceProfile(profile.toJson()) }
+        pipeline?.targetFps = profile.chosen.visionFpsBudget
+        governorLine = "profile: ${profile.chosen.threads} threads, " +
+            "%.1f fps budget".format(Locale.US, profile.chosen.visionFpsBudget)
+    }
+
+    /**
+     * One governor window: hand it what was measured and act on what it decides.
+     *
+     * Called on the UI tick rather than per frame — the governor reasons about windows, and
+     * feeding it every frame would only give it more chances to be indecisive.
+     */
+    private fun updateGovernor(state: FocusState, summary: SessionSummary) {
+        val g = governor ?: return
+        if (windowStartedMs == 0L) windowStartedMs = SystemClock.uptimeMillis()
+        val windowMs = SystemClock.uptimeMillis() - windowStartedMs
+        if (windowMs < GOVERNOR_WINDOW_MS) return
+        windowStartedMs = SystemClock.uptimeMillis()
+
+        val lastMessage = lastCoachMessage
+        val measurement = WindowMeasurement(
+            elapsedMs = state.elapsedMs,
+            // Only report a latency if one was actually produced in this session; a stale or
+            // absent number is not evidence and the governor treats null as "did not look".
+            ttftMs = lastMessage?.ttftMs,
+            decodeTokPerSec = lastMessage?.tokensPerSecond,
+            visionFps = perf.fps(),
+            rssBytes = (perf.rssMb() * 1024 * 1024).toLong(),
+        )
+        val decision = g.observe(measurement)
+        if (decision != null) {
+            synchronized(sessionLock) {
+                governorLog += decision
+                // Straight into the export: a decision nobody can audit afterwards is the
+                // same defect as a benchmark number with no evidence behind it.
+                sessionBuilder?.addGovernorDecision(decision.toJson())
+            }
+            if (decision.applied && decision.knob == "visionFpsBudget") {
+                pipeline?.targetFps = g.current.visionFpsBudget
+            }
+            Log.i(TAG, "governor: ${decision.knob} ${decision.from} -> ${decision.to} " +
+                "(applied=${decision.applied}) because ${decision.trigger?.summary ?: "recovery"}")
+        }
+        governorLine = buildString {
+            append("governor %.1f fps".format(Locale.US, g.current.visionFpsBudget))
+            append(" · ${g.decisions.size} decision${if (g.decisions.size == 1) "" else "s"}")
+            g.decisions.lastOrNull()?.let {
+                append(" · last: ${it.knob} ${it.from}→${it.to}")
+                if (!it.applied) append(" (logged)")
+            }
+        }
+    }
+
     private fun startCoach() {
         coach = CoachRunner(
             modelFile = File(getExternalFilesDir(null) ?: filesDir, "models/model.gguf"),
@@ -237,6 +320,7 @@ class SessionActivity : ComponentActivity() {
             onError = { message -> statusText.text = message },
         ).also { it.start(previewView) }
         startCoach()
+        startGovernor()
     }
 
     /** Called on the detector thread. */
@@ -326,6 +410,7 @@ class SessionActivity : ComponentActivity() {
         }
 
         val summary = latestSummary ?: return
+        updateGovernor(state, summary)
         summaryText.text = buildString {
             appendLine("mean %.0f   low %d   high %d   fatigue %.0f%% of session".format(
                 Locale.US, summary.meanScore, summary.minScore, summary.maxScore,
@@ -342,9 +427,10 @@ class SessionActivity : ComponentActivity() {
                 "blinks %d+ (rate undersampled at %.1f fps)".format(
                     Locale.US, summary.signals.blinkCount, summary.signals.meanVisionFps)
             }
-            append("%s   long closures %d   head %.1f deg".format(
+            appendLine("%s   long closures %d   head %.1f deg".format(
                 Locale.US, blinks,
                 summary.signals.longClosureCount, summary.signals.meanHeadStabilityDeg))
+            append(governorLine)
         }
     }
 
@@ -430,5 +516,13 @@ class SessionActivity : ComponentActivity() {
 
         /** Above this the timeline halves its resolution rather than dropping the past. */
         const val TIMELINE_MAX_POINTS = 900
+
+        /**
+         * How long the governor looks at before deciding anything.
+         *
+         * Thirty seconds, and the governor additionally requires two consecutive violating
+         * windows before it acts — so nothing changes on less than a minute of evidence.
+         */
+        const val GOVERNOR_WINDOW_MS = 30_000L
     }
 }

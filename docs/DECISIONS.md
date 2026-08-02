@@ -319,6 +319,54 @@ it is measured.
   fails if one appears anywhere else — that is the failure mode that would otherwise present
   as an unexplained SIGILL.
 
+## 2026-08-02 — Phase 6 complete: the governor runs the app
+
+`:governor` ("aarchmage") is implemented, tested, wired into the app, and producing profiles
+on two different Arm machines.
+
+**The architectural decision everything rested on:** the module is pure Kotlin/JVM with zero
+Android imports, the same rule as `:core`. Item 4 required the same self-benchmark path to run
+on `ubuntu-24.04-arm`, and §4.4 forbids the Android SDK there — one Android import would have
+made the cross-silicon exhibit impossible to build. CI now fails if `:governor` is *absent*
+from the arm64 build, mirroring the existing check that `:app` is absent.
+
+**The cross-silicon exhibit** (`bench/profiles/`), both derived by one code path:
+
+| | Galaxy A20e | ubuntu-24.04-arm |
+|---|---|---|
+| topology | 8 cores, 2 clusters, no dotprod/i8mm/SVE | 4 cores, 1 cluster, all of them |
+| sweep derived | 1, 2, 6, 8 | 1, 2, 4 |
+| chosen | **4 threads** | **1 thread** |
+| predicted | 2190 ms | 144 ms |
+
+Neither was configured. Shipping either machine's constant to the other would be wrong in
+both directions, which is the argument for the module in one table.
+
+**The runner measures a reference CPU kernel, not the model**, and says so in its own
+`device.workload_note` — a 270 MB fetch does not belong inside a 60-second benchmark. Thread
+scaling, the scaling knee, sustained-load behaviour, topology and features are comparable
+across the two; milliseconds are not.
+
+**In the app.** The LLM screen's fourth button runs the real self-benchmark with the real
+model and writes `device.profile.json`; the Session screen loads it, hands the coach its
+thread count, sets the vision frame budget, and runs the governor every 30 s against the
+contract. Applied decisions retune the frame budget by dropping frames before MediaPipe sees
+them — the camera keeps running, because reconfiguring capture costs more than it saves.
+Every decision and the profile itself go into the session export.
+
+**Scope held to the approved plan.** Only the frame budget is actuated. `n_ctx` and thread
+count are derived, logged with their predicted effect, and marked `applied=false` with the
+reason, because both mean rebuilding the model context under a live UI.
+
+### Bugs the first real runs exposed, which the simulation could not
+
+- The reference unit was 262 144 MACs; a 16-core machine finished it inside the millisecond
+  clock's resolution and least squares fitted a **negative cost per unit**. A benchmark whose
+  unit is smaller than its clock measures the clock. Now 8.4 M MACs.
+- `CostModel.fit` now rejects a non-positive slope and falls back to the mean ratio. An
+  impossible constant should never reach a profile however it arose.
+- The thread pool was being constructed inside the measurement. Now once per open model.
+
 ## 2026-08-02 — STRATEGIC PIVOT: Phase 6 becomes a self-tuning runtime (":governor" / "aarchmage")
 
 Architect decision after the judge webinar. Recorded verbatim, as issued:

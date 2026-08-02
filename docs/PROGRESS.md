@@ -191,6 +191,62 @@ We now have a measured violation, the exact knob that fixes it, and a before-num
 
 ---
 
+## 2026-08-02 — Phase 6: the app now tunes itself, and proves it on two machines
+
+**Did**
+- Built the self-tuning runtime the architect asked for, and wired it into the app so it
+  actually runs rather than sitting in a library.
+- **The exhibit.** The same code measured your phone and a GitHub Arm server, and came to
+  completely different conclusions — which is the entire point:
+
+  | | your A20e | the CI Arm server |
+  |---|---|---|
+  | cores | 8, in two clusters | 4, all the same |
+  | modern instructions | none of them | all of them |
+  | it chose | **4 threads** | **1 thread** |
+
+  Nobody configured either number. Shipping your phone's setting to the server, or the
+  server's to your phone, would be wrong in both directions.
+- **On the phone**, the LLM screen has a fourth button: *Self-benchmark → device profile*. It
+  measures your silicon with the real model, works out the cost of every thread count, picks
+  a configuration and writes down **why** in plain sentences. The Session screen then reads
+  that file and runs the coach and the camera the way it says.
+- While a session runs, the governor checks every 30 seconds whether the app is keeping its
+  promises. If it is not, it lowers the camera's frame budget — and records what it changed,
+  what triggered it, and the number that caused it, straight into the session file.
+- Deliberately narrow: it only actuates that one dial. Changing the thread count or context
+  size means rebuilding the model while you are looking at it, so those are worked out and
+  *written down* but not applied. The log says so explicitly.
+
+**Evidence**
+- Both profiles committed in `bench/profiles/`, with a README that leads with the caveat: the
+  server was measured with a stand-in workload, so thread scaling is comparable and
+  milliseconds are not.
+- CI produces the server's profile on every push.
+- 200+ tests across the three modules.
+
+**Two bugs the first real run found that the simulation could not**
+- The stand-in workload was too small: a 16-core machine finished a unit inside the clock's
+  resolution, and the maths fitted a **negative** cost per unit. A benchmark whose unit is
+  smaller than its clock measures the clock.
+- The cost model now refuses an impossible constant outright rather than publishing it.
+
+**Next — what you do**
+1. Install `0.6.0-governor`.
+2. **LLM smoke test → 4. Self-benchmark → device profile.** Takes about 90 seconds; leave the
+   screen on. It will print what it chose and why.
+3. Then run a session as usual — it will use that profile. I will pull both files myself.
+
+**Risks**
+- The self-benchmark opens the model once per thread count, so it is slower than the earlier
+  benchmark button. If it runs out of its budget it stops early and says so rather than
+  pretending it finished.
+- The governor has never yet had a real contract violation to react to on the phone, because
+  the coach now meets its targets. That is a good problem, but it means the reacting path is
+  tested only in simulation.
+
+---
+
 ## 2026-08-02 — The first coach session found two bugs (and memory is fine)
 
 **Did**

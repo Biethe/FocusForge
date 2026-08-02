@@ -208,6 +208,15 @@ data class GovernorConfig(
     val nCtxFloor: Int = 128,
 )
 
+/**
+ * Serialises a decision for a host that does not depend on a JSON library itself.
+ *
+ * The alternative was exposing kotlinx-serialization through this module's API, which would
+ * make every consumer inherit the dependency to write one line into a log.
+ */
+fun GovernorDecision.toJson(): String =
+    DeviceProfile.JSON.encodeToString(GovernorDecision.serializer(), this)
+
 /** One decision, with the measurement that caused it. Written into the session export. */
 @Serializable
 data class GovernorDecision(

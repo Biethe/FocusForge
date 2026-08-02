@@ -33,6 +33,7 @@ class LlmSmokeActivity : Activity() {
     private lateinit var output: TextView
     private lateinit var runButton: Button
     private lateinit var benchButton: Button
+    private lateinit var profileButton: Button
     private val worker = Executors.newSingleThreadExecutor()
 
     private val modelFile: File
@@ -60,6 +61,10 @@ class LlmSmokeActivity : Activity() {
             text = "3. Benchmark: threads x cache"
             setOnClickListener { runBenchmark() }
         }
+        profileButton = Button(this).apply {
+            text = "4. Self-benchmark → device profile"
+            setOnClickListener { runSelfBenchmark() }
+        }
 
         setContentView(ScrollView(this).apply {
             addView(LinearLayout(context).apply {
@@ -67,6 +72,7 @@ class LlmSmokeActivity : Activity() {
                 addView(importButton, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
                 addView(runButton, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
                 addView(benchButton, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
+                addView(profileButton, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
                 addView(output, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
             })
         })
@@ -296,6 +302,77 @@ class LlmSmokeActivity : Activity() {
                 benchButton.isEnabled = true
                 runButton.isEnabled = true
                 output.text = report.toString()
+            }
+        }
+    }
+
+    // ------------------------------------------------------------------ self-benchmark
+
+    /**
+     * The first-launch self-benchmark, run on demand.
+     *
+     * Same code as the CI runner executes, with the real model instead of the reference
+     * kernel: measure this silicon, fit a cost model, derive a configuration, and write the
+     * profile where the sync script will pick it up.
+     */
+    private fun runSelfBenchmark() {
+        val model = modelFile
+        if (!model.exists()) {
+            toast("Import a .gguf model first")
+            return
+        }
+        profileButton.isEnabled = false
+        benchButton.isEnabled = false
+        runButton.isEnabled = false
+        output.text = "Measuring this device…\nThis is the same self-benchmark the CI runner " +
+            "does, with the real model. Leave the screen on."
+
+        worker.execute {
+            val store = ProfileStore(this)
+            val lines = StringBuilder()
+            val profile = runCatching {
+                store.runSelfBenchmark(model, BuildConfig.VERSION_NAME) { step ->
+                    lines.appendLine(step)
+                    runOnUiThread { output.text = "Measuring this device…\n\n$lines" }
+                }
+            }.getOrElse { e ->
+                runOnUiThread {
+                    profileButton.isEnabled = true; benchButton.isEnabled = true
+                    runButton.isEnabled = true
+                    output.text = "Self-benchmark failed: ${e.message}"
+                }
+                return@execute
+            }
+
+            runOnUiThread {
+                profileButton.isEnabled = true; benchButton.isEnabled = true
+                runButton.isEnabled = true
+                output.text = if (profile == null) {
+                    "Self-benchmark produced nothing — is the model imported?"
+                } else buildString {
+                    appendLine("Device profile written")
+                    appendLine(store.profileFile.absolutePath)
+                    appendLine()
+                    appendLine("cores      ${profile.topology.coreCount} in " +
+                        "${profile.topology.clusters.size} cluster(s)")
+                    profile.topology.clusters.forEach { appendLine("           ${it.label}") }
+                    appendLine()
+                    appendLine("CHOSEN")
+                    appendLine("  threads      ${profile.chosen.threads}")
+                    appendLine("  vision fps   %.1f".format(Locale.US, profile.chosen.visionFpsBudget))
+                    appendLine("  meets contract ${profile.chosen.meetsContract}")
+                    appendLine()
+                    appendLine("COST MODEL (measured on this phone)")
+                    profile.evidence.costModel.perThreadCount.forEach {
+                        appendLine("  %2d threads  %5.1f ms/token  %.1f tok/s prefill".format(
+                            Locale.US, it.threads, it.msPerFreshToken, it.prefillTokPerSec))
+                    }
+                    appendLine()
+                    appendLine("WHY")
+                    profile.reasons.forEach { appendLine("  ${it.knob} = ${it.value}\n    ${it.because}") }
+                    appendLine()
+                    appendLine("The Session screen will use this from now on.")
+                }
             }
         }
     }
