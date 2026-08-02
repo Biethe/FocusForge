@@ -1,0 +1,5 @@
+[submodule "native/llama.cpp"]
+	path = native/llama.cpp
+	url = https://github.com/ggml-org/llama.cpp
+	# Shallow: llama.cpp's full history is ~1.5 GB and CI clones this every run.
+	shallow = true

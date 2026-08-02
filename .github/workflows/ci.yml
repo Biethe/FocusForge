@@ -15,7 +15,10 @@ jobs:
     permissions:
       contents: write
     steps:
+      # The native build compiles llama.cpp, pinned as a shallow submodule.
       - uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - uses: actions/setup-java@v4
         with:
@@ -23,6 +26,13 @@ jobs:
           java-version: "17"
 
       - uses: gradle/actions/setup-gradle@v3
+
+      # Pinned toolchain: the native build is the highest-risk part of the project and
+      # the NDK version is part of the reproduction recipe. No-op when already present.
+      - name: Install the pinned NDK and CMake
+        run: |
+          echo y | "$ANDROID_HOME"/cmdline-tools/latest/bin/sdkmanager \
+            "ndk;26.3.11579264" "cmake;3.22.1" > /dev/null
 
       - name: Build debug APK
         run: ./gradlew assembleDebug --no-daemon
@@ -44,6 +54,50 @@ jobs:
             echo "::error::INTERNET permission found — hard privacy rule violated"
             exit 1
           fi
+
+      # native/CMakeLists.txt fails the build if an armv8.2+ *flag* reaches the compiler.
+      # This checks the far more important thing: the actual instructions in the binary
+      # that lands on the operator's Armv8.0-A phone. A SIGILL here is not a slow app,
+      # it is a dead one, and it would only be discovered on the only device we have.
+      - name: Verify the native library contains no post-Armv8.0 instructions
+        run: |
+          set -euo pipefail
+          SO=$(find app/build/intermediates/cxx -name "libfocusforge_llm.so" -path "*arm64-v8a*" | head -1)
+          if [ -z "$SO" ]; then echo "::error::libfocusforge_llm.so was not built"; exit 1; fi
+          echo "Scanning $SO"
+          OBJDUMP="$ANDROID_HOME"/ndk/26.3.11579264/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-objdump
+          "$OBJDUMP" -d --no-show-raw-insn "$SO" > dis.txt
+          echo "disassembled $(wc -l < dis.txt) lines"
+
+          # dotprod (v8.2), i8mm (v8.6), bf16, SVE — none exist on an Exynos 7884B.
+          BAD=$(grep -cwE '\s(sdot|udot|smmla|ummla|usmmla|bfdot|bfmmla|bfcvt)' dis.txt || true)
+          SVE=$(grep -cE '\s(z[0-9]+\.[bhsd]|p[0-9]+/[mz])' dis.txt || true)
+          echo "post-v8.0 SIMD instructions: $BAD ; SVE register uses: $SVE"
+          if [ "$BAD" != "0" ] || [ "$SVE" != "0" ]; then
+            grep -nwE '\s(sdot|udot|smmla|ummla|usmmla|bfdot|bfmmla|bfcvt)' dis.txt | head -20 || true
+            echo "::error::Post-Armv8.0 instructions found — this APK would SIGILL on the A20e"
+            exit 1
+          fi
+
+          # LSE atomics (v8.1) are allowed ONLY inside clang's outline-atomic helpers,
+          # which branch on __aarch64_have_lse_atomics and fall back to ldxr/stxr.
+          # Anywhere else they would execute unconditionally and trap.
+          LSE_TOTAL=$(grep -cwE '\s(ldadd|ldaddal|ldaddl|ldaddа|swp|swpal|cas|casal|ldclr|ldset|ldeor)[a-z]*' dis.txt || true)
+          if [ "$LSE_TOTAL" != "0" ]; then
+            if ! grep -q "__aarch64_have_lse_atomics" dis.txt && \
+               ! "$ANDROID_HOME"/ndk/26.3.11579264/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-nm \
+                   "$SO" | grep -q "__aarch64_have_lse_atomics"; then
+              echo "::error::LSE atomics present with no runtime guard — would SIGILL on the A20e"
+              exit 1
+            fi
+            OUTSIDE=$(awk '/^[0-9a-f]+ <.*>:/ {fn=$0} /\s(ldadd|swp|cas|ldclr|ldset|ldeor)[a-z]*\s/ {if (fn !~ /__aarch64_/) print}' dis.txt | wc -l)
+            if [ "$OUTSIDE" != "0" ]; then
+              echo "::error::$OUTSIDE LSE atomic(s) outside the guarded outline-atomic helpers"
+              exit 1
+            fi
+            echo "LSE atomics: $LSE_TOTAL, all inside guarded __aarch64_* helpers (safe)"
+          fi
+          echo "Armv8.0 baseline verified on the shipped binary."
 
       - name: Rename APK
         run: cp app/build/outputs/apk/debug/app-debug.apk focusforge-debug.apk

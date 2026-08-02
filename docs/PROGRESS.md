@@ -5,6 +5,59 @@
 > "operator confirmed: &lt;what was seen&gt;". If something is not measured yet, it says
 > `NOT MEASURED YET`.
 
+## 2026-08-02 — Phase 5.0: the LLM smoke test is built and ready for the gate
+
+**Did**
+- Took the architect's highest-risk item first, exactly as instructed: **prove a model can
+  generate tokens on your phone before building anything on top of it.**
+- The danger is specific. Your phone's chip is a 2018 design that lacks several instructions
+  newer Arm chips have. llama.cpp's Android examples are built for those newer chips as a
+  matter of course, and such a build does not run slowly on your phone — it dies instantly
+  with an "illegal instruction" crash. So the whole job here was making that impossible.
+- Pinned llama.cpp at an exact version, pinned the Android compiler toolchain, and set every
+  build switch to the oldest, safest instruction set. Then checked the result **three ways**,
+  because a mistake here would only show up as a crash on the one phone we have.
+- Built a deliberately bare test screen: two buttons and a wall of text. Import a model,
+  generate 20 tokens, print the numbers. No coaching, no personality, no styling — that all
+  comes after the gate passes.
+
+**Evidence**
+- **Every one of the 209 compile commands** used the safe instruction set and nothing else.
+- The library's own feature detection found no dot-product, no matrix, no SVE support — so
+  those code paths were never compiled in.
+- I disassembled the finished library — **869,438 lines of machine instructions** — and found
+  **zero** of the instruction types your phone cannot run.
+- One genuine catch: the library *does* contain four instructions from a newer Arm version.
+  I read the surrounding code and they are safe — the compiler wraps them in a runtime check
+  that asks the CPU whether it supports them and takes an older path when it does not. Your
+  phone will take the older path. CI now enforces that they only ever appear inside that
+  guarded wrapper.
+- CI does the whole disassembly scan on every build from now on, so this cannot silently
+  regress.
+- **On-phone behaviour: NOT MEASURED YET.** That is the gate, and it needs you.
+
+**Next — what you do (this is the Aug 4 decision gate)**
+1. **On the PC**, download the coach model. Run `bash scripts/get_models.sh` — it prints the
+   exact search terms. In short: Hugging Face, search `SmolLM2-360M-Instruct GGUF`, download
+   the file ending `Q4_K_M.gguf` (250–300 MB). Check the model card says Apache-2.0.
+2. Copy that file to the phone over USB — Downloads is fine.
+3. Install `0.5.0-llm-smoke` from dev-latest. Open **FocusForge → LLM smoke test**.
+4. Tap **Import .gguf model**, pick the file. Wait for "Imported ... MB".
+5. Tap **Generate 20 tokens**. It may take a while the first time.
+6. **Send me the whole text block**, whatever it says — including if the app crashes instead.
+
+**Risks**
+- If the app dies rather than showing a result, that is almost certainly the illegal-instruction
+  crash. Tell me immediately; the compile flags are the suspect, not the model. I have not
+  been able to test on real Armv8.0 hardware — everything above is static verification.
+- Watch the RSS numbers. If they exceed 700 MB the architect's instruction is to stop and
+  report before building anything further, and the screen says so itself.
+- The gate is **end of Aug 4**. If tokens are not generating by then the architect's ruling is
+  to switch runtimes — though I have flagged in the plan that doing so would likely consume
+  the entire Phase 6 budget, and there is a cheaper option worth considering first.
+
+---
+
 ## 2026-08-02 — Architect's ruling applied: blink rate demoted, frame rate on every number
 
 **Did**

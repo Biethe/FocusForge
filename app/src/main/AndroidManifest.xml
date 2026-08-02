@@ -29,6 +29,11 @@
         </activity>
 
         <activity
+            android:name=".LlmSmokeActivity"
+            android:label="FocusForge — LLM smoke test"
+            android:exported="false" />
+
+        <activity
             android:name=".SessionActivity"
             android:label="FocusForge — Session"
             android:screenOrientation="portrait"

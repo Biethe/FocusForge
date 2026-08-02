@@ -51,6 +51,12 @@ class ProbeActivity : Activity() {
                 startActivity(Intent(this@ProbeActivity, SessionActivity::class.java))
             }
         }
+        val llmButton = Button(this).apply {
+            text = "LLM smoke test (Phase 5 gate)"
+            setOnClickListener {
+                startActivity(Intent(this@ProbeActivity, LlmSmokeActivity::class.java))
+            }
+        }
         val cameraButton = Button(this).apply {
             text = "Open camera probe"
             setOnClickListener {
@@ -61,6 +67,9 @@ class ProbeActivity : Activity() {
             addView(LinearLayout(context).apply {
                 orientation = LinearLayout.VERTICAL
                 addView(sessionButton, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply {
+                    setMargins(pad, pad, pad, 0)
+                })
+                addView(llmButton, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply {
                     setMargins(pad, pad, pad, 0)
                 })
                 addView(cameraButton, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply {

@@ -9,16 +9,44 @@ plugins {
 android {
     namespace = "com.focusforge"
     compileSdk = 34
+    // Pinned: the native build is the highest-risk part of this project and the
+    // toolchain version is part of the reproduction recipe.
+    ndkVersion = "26.3.11579264"
 
     defaultConfig {
         applicationId = "com.focusforge"
         minSdk = 28
         targetSdk = 34
-        versionCode = 8
-        versionName = "0.4.2-fps"
+        versionCode = 9
+        versionName = "0.5.0-llm-smoke"
         ndk {
             // A20e is arm64-v8a only per CLAUDE.md; we never ship other ABIs.
             abiFilters += "arm64-v8a"
+        }
+
+        externalNativeBuild {
+            cmake {
+                // Belt and braces: native/CMakeLists.txt already FORCEs these into the
+                // cache before llama.cpp is added, but passing them here too means the
+                // armv8.0 baseline is visible in the Gradle build log as well.
+                arguments += listOf(
+                    "-DGGML_NATIVE=OFF",
+                    "-DGGML_CPU_ARM_ARCH=armv8-a",
+                    "-DGGML_CPU_ALL_VARIANTS=OFF",
+                    "-DGGML_CPU_KLEIDIAI=OFF",
+                    "-DGGML_OPENMP=OFF",
+                    "-DGGML_LLAMAFILE=OFF",
+                    "-DCMAKE_BUILD_TYPE=Release",
+                )
+                cppFlags += "-march=armv8-a"
+            }
+        }
+    }
+
+    externalNativeBuild {
+        cmake {
+            path = file("../native/CMakeLists.txt")
+            version = "3.22.1"
         }
     }
 

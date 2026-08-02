@@ -5,6 +5,42 @@
 > Every optimization gets before/after numbers from committed benchmark files —
 > negative results are kept and reported honestly.
 
+## 2026-08-02 — Phase 5.0: llama.cpp pinned, and the Armv8.0 baseline is enforced three ways
+
+- **What/License:** llama.cpp (MIT) as a shallow git submodule at `native/llama.cpp`, pinned
+  to tag **b10227** (`f5919bf458ef190468b5c329bb293f8a54a1e69c`). NDK **26.3.11579264**
+  (r26d) and CMake 3.22.1, both pinned in `app/build.gradle.kts` and installed explicitly in
+  CI — the toolchain version is part of the reproduction recipe for the riskiest code we own.
+- **Why the flags matter more than usual:** the A20e is an Exynos 7884B, Armv8.0-A, with
+  `fp asimd aes sha1 sha2 crc32` and nothing else. llama.cpp's Android examples routinely
+  carry `-march=armv8.2-a+dotprod` or `+i8mm`. Such a binary does not run slowly on this
+  phone — it SIGILLs, on the only device we have.
+- **Configuration:** `GGML_NATIVE=OFF` (otherwise ggml runs `-mcpu=native` against the *build
+  host* and bakes in the CI runner's i8mm and SVE2 — precisely the instructions that would
+  kill us), `GGML_CPU_ARM_ARCH=armv8-a`, `GGML_CPU_ALL_VARIANTS=OFF`, `GGML_BACKEND_DL=OFF`,
+  `GGML_CPU_KLEIDIAI=OFF` (its kernels are all dotprod/i8mm/SVE), `GGML_OPENMP=OFF` (no
+  OpenMP in the NDK sysroot), `GGML_LLAMAFILE=OFF`.
+- **`GGML_LLAMAFILE` is off deliberately and temporarily.** It is a candidate *measured*
+  optimization — exactly the sort of A/B the Phase 6 governor exists to decide, rather than
+  something we switch on because it usually helps.
+- **Enforced three ways, because a warning would scroll past in CI:**
+  1. `native/CMakeLists.txt` fails the build if any banned flag reaches any target.
+  2. CI disassembles the shipped `.so` and fails on any `sdot/udot/smmla/ummla/bfdot/bfmmla`
+     or SVE register use.
+  3. The app prints what the `.so` was compiled for on the smoke-test screen, so a mis-built
+     APK is readable rather than inferred from a crash.
+- **Verified on the built binary (2026-08-02):** 209 of 209 compile commands used
+  `-march=armv8-a` and nothing else; ggml's own feature detection left `HAVE_DOTPROD`,
+  `HAVE_MATMUL_INT8`, `HAVE_SVE`, `HAVE_SME` and `HAVE_FP16_VECTOR_ARITHMETIC` all empty; and
+  869 438 lines of disassembly contain **zero** dotprod, i8mm, bf16 or SVE instructions.
+- **One subtlety worth recording.** The binary *does* contain four LSE atomic instructions
+  (`ldadd`/`ldaddal`, Armv8.1), which the A20e lacks. They are safe: clang's
+  `-moutline-atomics` puts them inside `__aarch64_ldadd*` helpers that branch on
+  `__aarch64_have_lse_atomics` and fall back to an `ldxr`/`stxr` loop. Confirmed by reading
+  the disassembly, not by assuming. CI allows LSE **only** inside those guarded helpers and
+  fails if one appears anywhere else — that is the failure mode that would otherwise present
+  as an unexplained SIGILL.
+
 ## 2026-08-02 — STRATEGIC PIVOT: Phase 6 becomes a self-tuning runtime (":governor" / "aarchmage")
 
 Architect decision after the judge webinar. Recorded verbatim, as issued:
