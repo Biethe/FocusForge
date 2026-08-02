@@ -31,6 +31,25 @@ data class ThreadCost(
     val interceptMs: Double = 0.0,
     /** Steady-state generation speed at this thread count. */
     val decodeTokPerSec: Double,
+    /**
+     * Ratio between the most and least expensive measurement at this thread count.
+     *
+     * 1.0 means every sample agreed. Anything much above that means the configuration is not
+     * measurable consistently, and a cost fitted through it is a number with a false air of
+     * precision.
+     */
+    val spreadRatio: Double = 1.0,
+    /**
+     * False when the samples disagreed too much to be trusted.
+     *
+     * Measured on the A20e (2026-08-02): two self-benchmark runs an hour apart agreed to
+     * within 2% at 1 and 2 threads, and disagreed by **3x at 8** — one 78-token prompt took
+     * 6720 ms where the others took 2185. Eight threads is every core on that phone, leaving
+     * none for Android's own camera and interface work, so the benchmark ends up competing
+     * with the device it is measuring. A configuration whose cost cannot be reproduced must
+     * not be selected on the strength of its best sample.
+     */
+    val reliable: Boolean = true,
 ) {
     /** Predicted time to first token for a prompt of which [reusedTokens] are already cached. */
     fun predictTtftMs(promptTokens: Int, reusedTokens: Int = 0): Double {
@@ -64,6 +83,7 @@ data class CostModel(
         promptTokens: Int,
         reusedTokens: Int = 0,
     ): ThreadCost? = perThreadCount
+        .filter { it.reliable }
         .sortedBy { it.threads }
         .firstOrNull { cost ->
             val ttftOk = contract.ttftMsMax?.let {
@@ -73,8 +93,15 @@ data class CostModel(
             ttftOk && decodeOk
         }
 
-    /** The fastest configuration measured, for when nothing meets the contract. */
-    fun fastest(): ThreadCost? = perThreadCount.minByOrNull { it.msPerFreshToken }
+    /**
+     * The fastest configuration measured, for when nothing meets the contract.
+     *
+     * Prefers a reproducible one: the fastest *unreliable* entry is usually just the luckiest
+     * sample of a noisy configuration.
+     */
+    fun fastest(): ThreadCost? =
+        perThreadCount.filter { it.reliable }.minByOrNull { it.msPerFreshToken }
+            ?: perThreadCount.minByOrNull { it.msPerFreshToken }
 
     companion object {
         /**
@@ -105,15 +132,29 @@ data class CostModel(
                 }
                 val decode = group.mapNotNull { it.decodeTokPerSec }.takeIf { it.isNotEmpty() }
                     ?.average() ?: 0.0
+
+                // Per-sample cost, used to ask whether this configuration is reproducible at
+                // all before its fitted constant is trusted.
+                val perSample = points.map { it.second / it.first }
+                val spread = if (perSample.min() > 0) perSample.max() / perSample.min() else 1.0
+
                 ThreadCost(
                     threads = threads,
                     msPerFreshToken = slope,
                     interceptMs = intercept,
                     decodeTokPerSec = decode,
+                    spreadRatio = spread,
+                    reliable = perSample.size < 2 || spread <= MAX_RELIABLE_SPREAD,
                 )
             }
             return CostModel(perThread.sortedBy { it.threads })
         }
+
+        /**
+         * How far two measurements of the same configuration may disagree and still be
+         * believed. 1.5 admits ordinary jitter and rejects the 3x swing seen at 8 threads.
+         */
+        const val MAX_RELIABLE_SPREAD = 1.5
 
         private fun leastSquares(points: List<Pair<Double, Double>>): Pair<Double, Double> {
             val n = points.size

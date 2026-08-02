@@ -133,6 +133,14 @@ object ProfileDeriver {
             }
         }
 
+        report.costModel.perThreadCount.filterNot { it.reliable }.forEach { cost ->
+            reasons += ChoiceReason("threads:${cost.threads}", "excluded",
+                "measurements at ${cost.threads} threads disagreed by " +
+                    "${"%.1f".format(cost.spreadRatio)}x, so this configuration is not " +
+                    "reproducible and was not considered. On a phone this usually means the " +
+                    "thread count leaves no cores for the operating system's own work")
+        }
+
         // --- affinity --------------------------------------------------------
         reasons += ChoiceReason("affinity", "none",
             "thread pinning has not been implemented or measured; the scheduler places " +

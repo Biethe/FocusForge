@@ -2,6 +2,7 @@ package dev.aarchmage
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -167,5 +168,86 @@ class ContractTest {
     fun `the contract round-trips through JSON`() {
         val original = PerformanceContract(ttftMsMax = 2500, batteryPercentPerHourMax = 12.0)
         assertEquals(original, PerformanceContract.fromJson(original.toJson()))
+    }
+}
+
+/**
+ * Reproducibility, from two real self-benchmark runs on the same phone an hour apart.
+ *
+ * The runs agreed to within 2% at 1 and 2 threads and disagreed by 3x at 8. A cost model that
+ * treats both the same publishes a number with a false air of precision, and a governor that
+ * selects on it is choosing the luckiest sample of a noisy configuration.
+ */
+class ReproducibilityTest {
+
+    /** Verbatim from the phone's second self-benchmark, 2026-08-02. */
+    private val run2 = listOf(
+        BenchmarkRun(threads = 1, promptTokens = 78, reusedTokens = 0, ttftMs = 9091, decodeTokPerSec = 6.6),
+        BenchmarkRun(threads = 1, promptTokens = 77, reusedTokens = 30, ttftMs = 5637, decodeTokPerSec = 6.1),
+        BenchmarkRun(threads = 2, promptTokens = 78, reusedTokens = 0, ttftMs = 4592, decodeTokPerSec = 12.4),
+        BenchmarkRun(threads = 2, promptTokens = 77, reusedTokens = 30, ttftMs = 2780, decodeTokPerSec = 12.4),
+        BenchmarkRun(threads = 6, promptTokens = 78, reusedTokens = 0, ttftMs = 2897, decodeTokPerSec = 8.9),
+        BenchmarkRun(threads = 6, promptTokens = 77, reusedTokens = 30, ttftMs = 1505, decodeTokPerSec = 14.9),
+        // The outlier: 6720 ms where the other run measured 2185 for the same work.
+        BenchmarkRun(threads = 8, promptTokens = 78, reusedTokens = 0, ttftMs = 6720, decodeTokPerSec = 3.4),
+        BenchmarkRun(threads = 8, promptTokens = 77, reusedTokens = 30, ttftMs = 1448, decodeTokPerSec = 1.6),
+    )
+
+    @Test
+    fun `a configuration that cannot be measured twice the same way is marked unreliable`() {
+        val model = CostModel.fit(run2)
+        assertTrue(model.forThreads(1)!!.reliable, "1 thread agreed to within 3%")
+        assertTrue(model.forThreads(2)!!.reliable, "2 threads agreed to within 1%")
+        assertFalse(
+            model.forThreads(8)!!.reliable,
+            "8 threads disagreed by ${model.forThreads(8)!!.spreadRatio}x and must not be trusted",
+        )
+        assertTrue(model.forThreads(8)!!.spreadRatio > 2.0)
+    }
+
+    @Test
+    fun `an unreliable configuration is never selected`() {
+        val model = CostModel.fit(run2)
+        val contract = PerformanceContract(ttftMsMax = 3000, decodeTokPerSecMin = 1.0)
+        val chosen = model.cheapestMeeting(contract, promptTokens = 83, reusedTokens = 30)
+        assertNotNull(chosen)
+        assertTrue(chosen.reliable, "picked a configuration it could not measure twice")
+        assertTrue(chosen.threads != 8, "8 threads is the unreproducible one")
+    }
+
+    @Test
+    fun `the fastest fallback prefers a reproducible configuration`() {
+        val model = CostModel.fit(run2)
+        val fastest = model.fastest()
+        assertNotNull(fastest)
+        assertTrue(
+            fastest.reliable,
+            "the fastest unreliable entry is usually just its luckiest sample",
+        )
+    }
+
+    @Test
+    fun `a profile records why a configuration was excluded`() {
+        val report = BenchmarkReport(
+            topology = CpuTopology(8, listOf(CpuCluster((0..7).toList(), 1_500_000)), "fp asimd", null),
+            runs = run2, costModel = CostModel.fit(run2), memory = null, thermal = null,
+            durationMs = 60_000, budgetMs = 90_000, complete = true,
+        )
+        val profile = ProfileDeriver.derive(report, PerformanceContract(), typicalPromptTokens = 83,
+            typicalReusedTokens = 30)
+        val excluded = profile.reasons.single { it.knob == "threads:8" }
+        assertEquals("excluded", excluded.value)
+        assertTrue(excluded.because.contains("not"), excluded.because)
+        assertTrue(excluded.because.contains("operating system"), excluded.because)
+    }
+
+    @Test
+    fun `a single sample is not called unreliable for lack of a second`() {
+        // One measurement cannot disagree with itself. Absence of evidence about spread is
+        // not evidence of noise.
+        val model = CostModel.fit(
+            listOf(BenchmarkRun(threads = 4, promptTokens = 80, reusedTokens = 0, ttftMs = 3200)))
+        assertTrue(model.forThreads(4)!!.reliable)
+        assertEquals(1.0, model.forThreads(4)!!.spreadRatio, 1e-9)
     }
 }
