@@ -83,7 +83,29 @@ Anything Android-specific reaches the module through an interface implemented by
 CI rule for this project forbids the Android SDK on the Arm runner, so a single Android import
 here would make the cross-silicon exhibit impossible to build.
 
+## The device profile
+
+The output is a "silicon lockfile": what the machine is, what was measured, what was chosen,
+and **why** — with the raw benchmark embedded so the file stands alone.
+
+The reasons are the point. `threads: 6` is a configuration file. This is evidence:
+
+```json
+{ "knob": "threads", "value": "6",
+  "because": "cheapest configuration predicted to satisfy the contract: 2656 ms for an
+              83-token prompt (0 cached) against a limit of 3000 ms; prefill measured at
+              31.2 tok/s" }
+```
+
+Anyone reading it can dispute it, which is the only property that makes an automated choice
+trustworthy. Because the evidence travels with the profile, a stricter contract can be tested
+against the same run — no second benchmark, no user sitting through it again.
+
+A guess is never dressed as a result. Choosing between model files currently records
+*"NOT a measured comparison ... a preference for the smaller file, not evidence"*, because no
+benchmark has been run across quantisations yet.
+
 ## Status
 
-Under construction — Phase 6. Discovery, the contract and the cost model are implemented and
-tested; the benchmark harness, profile derivation and the governor loop are in progress.
+Under construction — Phase 6. Discovery, the contract, the cost model, the self-benchmark
+harness and profile derivation are implemented and tested. The governor loop is next.
