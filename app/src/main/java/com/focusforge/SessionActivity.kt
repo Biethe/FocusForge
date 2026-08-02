@@ -306,8 +306,13 @@ class SessionActivity : ComponentActivity() {
     }
 
     private fun startCoach() {
+        // The device profile decides the thread count. Until now CoachRunner used its own
+        // constant, which happened to equal what the profile chose — a wiring gap that
+        // survives review precisely because the numbers agree.
+        val profileThreads = ProfileStore(this).load()?.chosen?.threads
         coach = CoachRunner(
             modelFile = File(getExternalFilesDir(null) ?: filesDir, "models/model.gguf"),
+            threads = profileThreads ?: CoachRunner.DEFAULT_THREADS,
             onMessage = { message, timing ->
                 lastCoachMessage = message
                 lastCoachTiming = timing

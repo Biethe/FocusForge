@@ -124,7 +124,10 @@ object ProfileDeriver {
                     "cheapest configuration predicted to satisfy the contract: " +
                         "${predicted.toInt()} ms for a $typicalPromptTokens-token prompt " +
                         "($typicalReusedTokens cached) against a limit of ${contract.ttftMsMax} ms; " +
-                        "prefill measured at ${"%.1f".format(chosenCost.prefillTokPerSec)} tok/s")
+                        "prefill measured at ${"%.1f".format(chosenCost.prefillTokPerSec)} tok/s. " +
+                        "NOTE: measured with the application's other workloads idle, so live " +
+                        "latency will be higher — on the A20e a session with the camera " +
+                        "running came in 1.66x above this prediction (2026-08-02)")
             } else {
                 ChoiceReason("threads", "$threads",
                     "NO configuration was predicted to satisfy the contract. This is the " +

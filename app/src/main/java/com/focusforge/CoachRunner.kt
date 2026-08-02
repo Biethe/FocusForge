@@ -41,7 +41,7 @@ class CoachRunner(
      * Counterintuitive on a chip with two big cores, and it is exactly why the Phase 6
      * governor benchmarks rather than assumes. Thread *affinity* remains untested.
      */
-    private val threads: Int = 6,
+    private val threads: Int = DEFAULT_THREADS,
     private val nCtx: Int = 512,
     /** Called on a worker thread when a message has been generated. */
     private val onMessage: (CoachMessage, String) -> Unit,
@@ -144,8 +144,15 @@ class CoachRunner(
         worker.shutdown()
     }
 
-    private companion object {
-        const val TAG = "FocusCoach"
+    companion object {
+        /**
+         * Used only when no device profile exists yet. Six because it was measured on the
+         * A20e, but a measured profile always overrides it — a constant is a starting point,
+         * not an answer.
+         */
+        const val DEFAULT_THREADS = 6
+
+        private const val TAG = "FocusCoach"
 
         /**
          * A 30-word message is roughly 45 tokens; 60 leaves room to finish a sentence, and
@@ -154,6 +161,6 @@ class CoachRunner(
          * Lowered from 80 after both on-device messages ran to the cap and were cut
          * mid-clause. A cap the model keeps hitting is a cap set too high for it.
          */
-        const val MAX_TOKENS = 60
+        private const val MAX_TOKENS = 60
     }
 }

@@ -81,3 +81,48 @@ server, or the server's to the phone, would be wrong in both directions.
 `ci-arm64.device.profile.json` is produced by the `core-tests` job on every push and uploaded
 as the `device-profiles` artifact; the copy here came from
 [run 30764459115](https://github.com/Biethe/FocusForge/actions/runs/30764459115).
+
+## Three self-benchmarks on the same phone, and what they disagree about
+
+`a20e-selfbench.device.profile.json`, `...-run2`, `...-run3` — the same device, same build,
+within a couple of hours.
+
+| threads | run 1 | run 2 | run 3 |
+|---|---|---|---|
+| 1 | 117.6, 117.4 | 116.6, 119.9 | 117.5 |
+| 2 | 59.0, 59.5 | 58.9, 59.1 | 58.4 |
+| 6 | 32.3, 31.6 | 37.1, 32.0 | 31.6 |
+| **8** | **28.0, 27.1** | **86.2, 30.8** | **57.9** |
+
+One and two threads are reproducible to within 3%. **Eight threads is not reproducible at
+all** — it is every core on the phone, leaving none for Android's own camera and interface
+work, so the benchmark competes with the device it is measuring.
+
+All three runs chose 6 threads regardless, so the *decision* was stable while the measurement
+underneath it was not.
+
+### A limitation the spread check does not cover
+
+`CostModel` marks a thread count unreliable when its samples disagree **within one run**. Run 3
+measured 8 threads at 57.9 ms/token with both samples agreeing, so it looks perfectly
+reliable — and it is twice run 1's figure. **Internal consistency is not reproducibility.**
+Catching that needs repeated benchmarks over time, which nothing here does yet.
+
+## The profiles are optimistic, and by a measured amount
+
+The self-benchmark runs with the rest of the application idle. The coach runs with the camera
+and face tracker live on the same cores. On 2026-08-02 that difference was measured:
+
+| | |
+|---|---|
+| predicted from the profile (59 fresh tokens x 31.6 ms) | 1867 ms |
+| measured in a live session, camera running | **3097 ms** |
+| | **1.66x** |
+
+The prediction is not wrong about the silicon; it is answering a question — "how fast is this
+machine when nothing else is happening" — that the application never asks. Every profile now
+carries this caveat in its own `threads` reason rather than only here.
+
+The honest fix is to benchmark under a representative load, which would cost a camera session
+inside the 60-second budget. It is not done, and until it is, **treat a profile's predicted
+latency as a floor**.

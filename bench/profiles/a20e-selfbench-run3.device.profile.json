@@ -1,0 +1,226 @@
+{
+    "schemaVersion": 1,
+    "device": {
+        "label": "samsung SM-A202F",
+        "android": "11",
+        "app_version": "0.6.0-governor",
+        "workload": "llama.cpp + model.gguf",
+        "workload_note": "Real language-model measurements on the physical device."
+    },
+    "generatedAtEpochMs": 1785704697429,
+    "topology": {
+        "coreCount": 8,
+        "clusters": [
+            {
+                "cores": [
+                    6,
+                    7
+                ],
+                "maxFreqKhz": 1560000
+            },
+            {
+                "cores": [
+                    0,
+                    1,
+                    2,
+                    3,
+                    4,
+                    5
+                ],
+                "maxFreqKhz": 1352000
+            }
+        ],
+        "features": "fp asimd evtstrm aes pmull sha1 sha2 crc32",
+        "totalRamBytes": 2876395520
+    },
+    "contract": {
+        "ttftMsMax": 3000,
+        "decodeTokPerSecMin": 5.0,
+        "visionFpsMin": 5.0,
+        "rssBytesMax": 734003200,
+        "batteryPercentPerHourMax": null
+    },
+    "chosen": {
+        "threads": 6,
+        "nCtx": 512,
+        "affinity": null,
+        "visionFpsBudget": 8.0,
+        "modelFile": "model.gguf",
+        "meetsContract": true
+    },
+    "reasons": [
+        {
+            "knob": "threads",
+            "value": "6",
+            "because": "cheapest configuration predicted to satisfy the contract: 1703 ms for a 83-token prompt (30 cached) against a limit of 3000 ms; prefill measured at 31.6 tok/s"
+        },
+        {
+            "knob": "affinity",
+            "value": "none",
+            "because": "thread pinning has not been implemented or measured; the scheduler places threads. Recorded as an explicit 'not measured' rather than an empty field"
+        },
+        {
+            "knob": "visionFpsBudget",
+            "value": "8.0",
+            "because": "contract floor 5.0 plus headroom; sustained load cost only -10% throughput"
+        },
+        {
+            "knob": "modelFile",
+            "value": "model.gguf",
+            "because": "only one model file is present, so there was nothing to choose between"
+        },
+        {
+            "knob": "memory",
+            "value": "within budget",
+            "because": "peak RSS 533 MB against a limit of 700 MB; the model itself cost 401 MB and took 2449 ms to load"
+        }
+    ],
+    "evidence": {
+        "topology": {
+            "coreCount": 8,
+            "clusters": [
+                {
+                    "cores": [
+                        6,
+                        7
+                    ],
+                    "maxFreqKhz": 1560000
+                },
+                {
+                    "cores": [
+                        0,
+                        1,
+                        2,
+                        3,
+                        4,
+                        5
+                    ],
+                    "maxFreqKhz": 1352000
+                }
+            ],
+            "features": "fp asimd evtstrm aes pmull sha1 sha2 crc32",
+            "totalRamBytes": 2876395520
+        },
+        "runs": [
+            {
+                "threads": 1,
+                "affinity": null,
+                "promptTokens": 78,
+                "reusedTokens": 0,
+                "ttftMs": 9136,
+                "decodeTokPerSec": 6.5907729179149195,
+                "rssBytes": 556990464
+            },
+            {
+                "threads": 1,
+                "affinity": null,
+                "promptTokens": 79,
+                "reusedTokens": 32,
+                "ttftMs": 5493,
+                "decodeTokPerSec": 6.756756756756757,
+                "rssBytes": 557477888
+            },
+            {
+                "threads": 2,
+                "affinity": null,
+                "promptTokens": 78,
+                "reusedTokens": 0,
+                "ttftMs": 4589,
+                "decodeTokPerSec": 12.359550561797754,
+                "rssBytes": 560541696
+            },
+            {
+                "threads": 2,
+                "affinity": null,
+                "promptTokens": 79,
+                "reusedTokens": 32,
+                "ttftMs": 2780,
+                "decodeTokPerSec": 12.331838565022421,
+                "rssBytes": 557899776
+            },
+            {
+                "threads": 6,
+                "affinity": null,
+                "promptTokens": 78,
+                "reusedTokens": 0,
+                "ttftMs": 2495,
+                "decodeTokPerSec": 13.173652694610778,
+                "rssBytes": 573288448
+            },
+            {
+                "threads": 6,
+                "affinity": null,
+                "promptTokens": 79,
+                "reusedTokens": 32,
+                "ttftMs": 1514,
+                "decodeTokPerSec": 13.76720901126408,
+                "rssBytes": 573292544
+            },
+            {
+                "threads": 8,
+                "affinity": null,
+                "promptTokens": 78,
+                "reusedTokens": 0,
+                "ttftMs": 3159,
+                "decodeTokPerSec": 2.110919209364805,
+                "rssBytes": 591638528
+            },
+            {
+                "threads": 8,
+                "affinity": null,
+                "promptTokens": 79,
+                "reusedTokens": 32,
+                "ttftMs": 1363,
+                "decodeTokPerSec": 6.670709520921771,
+                "rssBytes": 558927872
+            }
+        ],
+        "costModel": {
+            "perThreadCount": [
+                {
+                    "threads": 1,
+                    "msPerFreshToken": 117.51612903225806,
+                    "interceptMs": -30.258064516128798,
+                    "decodeTokPerSec": 6.673764837335838
+                },
+                {
+                    "threads": 2,
+                    "msPerFreshToken": 58.354838709677416,
+                    "interceptMs": 37.32258064516145,
+                    "decodeTokPerSec": 12.345694563410088
+                },
+                {
+                    "threads": 6,
+                    "msPerFreshToken": 31.64516129032258,
+                    "interceptMs": 26.677419354838776,
+                    "decodeTokPerSec": 13.47043085293743
+                },
+                {
+                    "threads": 8,
+                    "msPerFreshToken": 57.935483870967744,
+                    "interceptMs": -1359.967741935484,
+                    "decodeTokPerSec": 4.390814365143288
+                }
+            ]
+        },
+        "memory": {
+            "rssBeforeLoadBytes": 133312512,
+            "rssAfterLoadBytes": 554643456,
+            "rssAfterGenerateBytes": 558927872,
+            "loadMs": 2449
+        },
+        "thermal": {
+            "threads": 6,
+            "samples": 9,
+            "durationMs": 21563,
+            "firstThirdTokPerSec": 13.735060161127587,
+            "lastThirdTokPerSec": 15.107322865101702,
+            "deratingPercent": -9.99094789448275,
+            "vendorThermalStatus": "none"
+        },
+        "durationMs": 70040,
+        "budgetMs": 90000,
+        "complete": true,
+        "notes": []
+    }
+}
