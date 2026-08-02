@@ -79,24 +79,26 @@ jobs:
             exit 1
           fi
 
-          # LSE atomics (v8.1) are allowed ONLY inside clang's outline-atomic helpers,
-          # which branch on __aarch64_have_lse_atomics and fall back to ldxr/stxr.
-          # Anywhere else they would execute unconditionally and trap.
-          LSE_TOTAL=$(grep -cwE '\s(ldadd|ldaddal|ldaddl|ldaddа|swp|swpal|cas|casal|ldclr|ldset|ldeor)[a-z]*' dis.txt || true)
-          if [ "$LSE_TOTAL" != "0" ]; then
-            if ! grep -q "__aarch64_have_lse_atomics" dis.txt && \
-               ! "$ANDROID_HOME"/ndk/26.3.11579264/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-nm \
-                   "$SO" | grep -q "__aarch64_have_lse_atomics"; then
-              echo "::error::LSE atomics present with no runtime guard — would SIGILL on the A20e"
-              exit 1
-            fi
-            OUTSIDE=$(awk '/^[0-9a-f]+ <.*>:/ {fn=$0} /\s(ldadd|swp|cas|ldclr|ldset|ldeor)[a-z]*\s/ {if (fn !~ /__aarch64_/) print}' dis.txt | wc -l)
-            if [ "$OUTSIDE" != "0" ]; then
-              echo "::error::$OUTSIDE LSE atomic(s) outside the guarded outline-atomic helpers"
-              exit 1
-            fi
-            echo "LSE atomics: $LSE_TOTAL, all inside guarded __aarch64_* helpers (safe)"
+          # LSE atomics (v8.1) exist in this binary and the A20e cannot execute them.
+          # They are safe for exactly one reason: clang's -moutline-atomics puts them
+          # inside __aarch64_* helpers that test __aarch64_have_lse_atomics at runtime and
+          # fall back to an ldxr/stxr loop. So the check is not "are there LSE atomics"
+          # (there are) but "is every one of them inside a guarded helper".
+          #
+          # Checked by walking the disassembly and tracking the enclosing function, rather
+          # than by looking for the guard symbol by name: objdump resolves the guard's
+          # address to a neighbouring symbol, so the name never appears in the text.
+          OUTSIDE=$(awk '
+            /^[0-9a-f]+ <.*>:/ { fn = $0 }
+            /[[:space:]](ldadd|ldclr|ldeor|ldset|ldsmax|ldsmin|ldumax|ldumin|swp|cas|casp)[a-z]*[[:space:]]/ {
+              if (fn !~ /__aarch64_/) print fn " | " $0
+            }' dis.txt)
+          if [ -n "$OUTSIDE" ]; then
+            echo "$OUTSIDE" | head -20
+            echo "::error::LSE atomics outside the guarded outline-atomic helpers — would SIGILL on the A20e"
+            exit 1
           fi
+          echo "LSE atomics: all inside guarded __aarch64_* outline-atomic helpers (safe)"
           echo "Armv8.0 baseline verified on the shipped binary."
 
       - name: Rename APK
