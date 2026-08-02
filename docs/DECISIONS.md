@@ -5,6 +5,39 @@
 > Every optimization gets before/after numbers from committed benchmark files —
 > negative results are kept and reported honestly.
 
+## 2026-08-02 — Two bugs the first coach session exposed, and a reverted fix
+
+Session: `bench/sessions/session-sm-a202f-20260802-155732.json`, 1.7 min, 0.5.3, RSS peak
+**560 MB** — under the 700 MB budget and below the 598 MB the addition predicted, so the
+camera and the model genuinely coexist.
+
+**Bug 1 — the coach never spoke.** The fatigue flag rose at t=46 s and stayed up for 56% of
+the session; zero messages. `CoachPolicy` tested a *rising edge* against the previous frame,
+but updated that previous value even on frames where the policy returned early during
+warm-up. So an episode beginning before the 60 s warm-up had its transition consumed and
+could never fire. Replaced with **episode tracking**: fatigue is coachable while the flag is
+up and not yet coached, and re-arms when the flag clears. Fixes the class, not the instance.
+
+**Bug 2 — the open-eye reference calibrated a third low.** `earOpen` landed at 0.188 against
+0.274/0.293/0.298 in the three recordings. Cause: the user looks *down at the phone* to tap
+"Start session", so the first seconds carry a depressed eye aspect ratio — and the reference
+was a median **frozen** at the end of a 5-second window. Since closure is `1 - EAR/earOpen`,
+that scaled every later reading.
+
+**The fix that was tried and reverted, because it is the more interesting result.** The first
+attempt made the reference a **p90** over a rolling window, reasoning that an open eye is the
+upper part of the distribution. It regressed the pipeline: a higher reference makes every
+frame read *more* closed, which amplifies the confound that EAR also falls when looking down
+(§16.3). On the distracted recording long closures went 2 → 6 and the fatigue flag began
+firing on a session where the user was merely distracted — the exact false positive the split
+thresholds were introduced to prevent.
+
+**What shipped: the median, rolling instead of frozen.** The window was the bug, not the
+statistic. It recovers within a minute of the user looking up and then follows their posture.
+Replay numbers after the change (before → after): focused PERCLOS 0.000 → 0.000, long
+closures 0 → 0; distracted 2 → 2 long closures, no fatigue; drowsy PERCLOS 0.118 → 0.090,
+long closures 14 → 12, fatigue 0.66 of the session. All ordering assertions hold.
+
 ## 2026-08-02 — Phase 5 GATE PASSED with real numbers, and one new risk
 
 Measured on the A20e, build 0.5.2, q8_0 (386 MB), 2 threads, n_ctx 512.

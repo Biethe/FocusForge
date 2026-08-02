@@ -17,8 +17,8 @@ android {
         applicationId = "com.focusforge"
         minSdk = 28
         targetSdk = 34
-        versionCode = 12
-        versionName = "0.5.3-coach"
+        versionCode = 13
+        versionName = "0.5.4-coachfix"
         ndk {
             // A20e is arm64-v8a only per CLAUDE.md; we never ship other ABIs.
             abiFilters += "arm64-v8a"

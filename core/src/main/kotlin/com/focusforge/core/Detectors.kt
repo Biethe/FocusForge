@@ -217,7 +217,8 @@ class BaselineCalibrator(private val config: SignalConfig) {
     private val yaws = ArrayList<Double>()
     private val pitches = ArrayList<Double>()
     private val irisRatios = ArrayList<Double>()
-    private val ears = ArrayList<Double>()
+    /** (timestamp, EAR) over the rolling window — see SignalThresholds.EAR_OPEN_WINDOW_MS. */
+    private val ears = ArrayDeque<Pair<Long, Double>>()
     private var firstTimestampMs: Long? = null
 
     var calibrated = false
@@ -241,7 +242,13 @@ class BaselineCalibrator(private val config: SignalConfig) {
     var earOpen = config.earOpenRef
         private set
 
+    /**
+     * The pose baseline freezes once calibrated; [earOpen] does not, because it is a rolling
+     * estimate that must survive a change of posture (and a session started while looking
+     * down at the phone).
+     */
     fun update(timestampMs: Long, orientation: Orientation?, irisH: Double?, ear: Double?) {
+        updateEarOpen(timestampMs, ear)
         if (calibrated) return
         val start = firstTimestampMs ?: timestampMs.also { firstTimestampMs = it }
         if (orientation != null) {
@@ -249,19 +256,38 @@ class BaselineCalibrator(private val config: SignalConfig) {
             pitches += orientation.pitchDeg
         }
         if (irisH != null) irisRatios += irisH
-        if (ear != null && ear > 0.0) ears += ear
 
         yawDeg = median(yaws)
         pitchDeg = median(pitches)
         irisRatio = median(irisRatios)
         // One frame must not be allowed to define "open": a session that starts mid-blink
         // would set the reference to a shut eye and then read every closure as zero. Until
-        // there are enough samples for a meaningful median, the literature default stands.
-        if (ears.size >= config.baselineMinSamples) earOpen = median(ears)
+        // there are enough samples to be meaningful, the literature default stands.
 
         val enoughTime = timestampMs - start >= config.baselineCalibrationMs
         val enoughSamples = yaws.size >= config.baselineMinSamples
         if (enoughTime && enoughSamples) calibrated = true
+    }
+
+    /** Rolling high percentile of the eye aspect ratio — this user's open eye, continuously. */
+    private fun updateEarOpen(timestampMs: Long, ear: Double?) {
+        if (ear == null || ear <= 0.0) return
+        ears.addLast(timestampMs to ear)
+        while (ears.isNotEmpty() && timestampMs - ears.first().first > config.earOpenWindowMs) {
+            ears.removeFirst()
+        }
+        // One frame must not define "open": a session starting mid-blink would set the
+        // reference to a shut eye and then read every later closure as zero.
+        if (ears.size >= config.baselineMinSamples) {
+            earOpen = percentile(ears.map { it.second }, config.earOpenPercentile)
+        }
+    }
+
+    private fun percentile(values: List<Double>, pct: Double): Double {
+        if (values.isEmpty()) return config.earOpenRef
+        val sorted = values.sorted()
+        val index = ((sorted.size - 1) * pct / 100.0).toInt().coerceIn(0, sorted.size - 1)
+        return sorted[index]
     }
 
     fun reset() {

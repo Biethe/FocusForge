@@ -185,6 +185,46 @@ class BaselineCalibratorTest {
     }
 
     @Test
+    fun `an open-eye reference learned while looking down recovers`() {
+        // Regression, from a real session (2026-08-02). The user looks down at the phone to
+        // tap "start", so the first seconds carry a depressed eye aspect ratio. A reference
+        // frozen from those seconds calibrated to 0.188 against a true 0.28 — a third low,
+        // which then scaled every closure reading for the rest of the session.
+        val c = BaselineCalibrator(SignalConfig())
+        var t = 0L
+        while (t < 6_000L) {                       // 6 s looking down at the phone
+            c.update(t, Orientation(0.0, 0.0, 0.0), 0.0, 0.185)
+            t += 100L
+        }
+        val whileLookingDown = c.earOpen
+        assertTrue(whileLookingDown < 0.22, "reference during look-down was $whileLookingDown")
+
+        while (t < 60_000L) {                      // then reading normally
+            c.update(t, Orientation(0.0, 0.0, 0.0), 0.0, 0.28)
+            t += 100L
+        }
+        assertEquals(
+            0.28, c.earOpen, 0.01,
+            "the reference must follow the user once they look up; it is rolling, not frozen",
+        )
+    }
+
+    @Test
+    fun `the open-eye reference survives a long stretch of closed eyes`() {
+        // The other direction: someone genuinely drowsy must not have their "open" reference
+        // dragged down to a shut eye, which would make later closures read as zero.
+        val c = BaselineCalibrator(SignalConfig())
+        var t = 0L
+        while (t < 30_000L) { c.update(t, Orientation(0.0, 0.0, 0.0), 0.0, 0.28); t += 100L }
+        // 20 s of the eyes mostly shut — a third of the rolling window.
+        while (t < 50_000L) { c.update(t, Orientation(0.0, 0.0, 0.0), 0.0, 0.05); t += 100L }
+        assertTrue(
+            c.earOpen > 0.2,
+            "20 s of closed eyes dragged the open reference to ${c.earOpen}",
+        )
+    }
+
+    @Test
     fun `stops moving once calibrated`() {
         val c = BaselineCalibrator(SignalConfig())
         for (t in 0L..6_000L step 100L) c.update(t, Orientation(0.0, 0.0, 0.0), 0.0, 0.28)

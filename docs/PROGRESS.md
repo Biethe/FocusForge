@@ -5,6 +5,59 @@
 > "operator confirmed: &lt;what was seen&gt;". If something is not measured yet, it says
 > `NOT MEASURED YET`.
 
+## 2026-08-02 — The first coach session found two bugs (and memory is fine)
+
+**Did**
+- You ran a session with the coach and sent the file. **Memory peaked at 560 MB** — under the
+  700 MB budget, and better than the 598 MB my arithmetic predicted. The camera and the
+  language model genuinely coexist on your phone. That question is closed.
+- The session also found **two real bugs**, which is exactly what a first run is for.
+
+**Bug 1 — the coach never said anything.** Your fatigue flag went up at 46 seconds and stayed
+up for more than half the session, and it stayed silent throughout. My rule was "speak when
+fatigue *starts*" — but I checked that against the previous moment even while the app was
+still warming up. Your fatigue started 14 seconds before the warm-up ended, so the app
+noticed the change during a period when it had decided not to speak, and then considered it
+old news forever. Now it tracks the *episode* rather than the moment it began.
+
+**Bug 2 — the app mis-learned what your open eye looks like.** It measured 0.188, where your
+three recordings all gave 0.274–0.298. The reason is almost funny: **you look down at the
+phone to tap "Start session"**, so the first seconds of every session show narrowed eyes —
+and the app was freezing that as your normal. Every eye measurement afterwards was scaled by
+that wrong number.
+
+- I fixed it by letting the reference keep updating instead of freezing after five seconds.
+  It now recovers within a minute of you looking up.
+- **I tried a cleverer fix first and it made things worse**, which is worth recording. I
+  reasoned that an open eye is the *widest* the eye gets, so I used a high-end estimate
+  instead of a middle one. That made everything read as more closed, which made the app think
+  you were tired during the *distracted* recording — a false alarm. Reverted. The problem was
+  that the reference was frozen, not how it was calculated.
+
+**Evidence**
+- Session committed at `bench/sessions/session-sm-a202f-20260802-155732.json`.
+- **119 `:core` tests pass**, five of them new and written directly from these two failures:
+  a fatigue episode that starts during warm-up is still coached; one episode produces one
+  message, not a nag; two separate episodes are both coached; a reference learned while
+  looking down recovers; and twenty seconds of closed eyes does not drag "open" down to
+  "shut".
+- The three labelled recordings still order correctly after the change.
+
+**Next — what you do**
+1. Install `0.5.4-coachfix` and run a session again, in **airplane mode**.
+2. Do the slow blinks; the coach should now speak about a minute in.
+3. **Screenshot the coaching message with the airplane icon visible** — required submission
+   artifact — and send the session JSON.
+4. If it still says nothing, tell me what the grey status line above the buttons says. It
+   reports whether the model loaded.
+
+**Risks**
+- I still have not seen the coach generate a single word on the phone. Everything about it is
+  tested in simulation only.
+- Your session was 1.7 minutes. The ten-minute check-in has never run.
+
+---
+
 ## 2026-08-02 — The camera and the model fit together; the coach is built
 
 **Did**

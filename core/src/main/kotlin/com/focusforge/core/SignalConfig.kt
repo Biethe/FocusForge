@@ -78,6 +78,28 @@ object SignalThresholds {
      */
     const val EAR_OPEN_REF = 0.28
 
+    /**
+     * The open-eye reference is a median over a **rolling** window rather than one frozen at
+     * the end of calibration. The window is what changed; the median is deliberately kept.
+     *
+     * The bug it fixes: a user spends the first seconds of a session looking *down at the
+     * phone* to start it, and a reference frozen from those seconds is wrong for the next
+     * forty minutes. The three labelled recordings, made to a protocol that said "look at your
+     * work normally first", calibrated to 0.274 / 0.293 / 0.298; a real session started by
+     * simply tapping the button calibrated to **0.188** (2026-08-02) — a third low, which
+     * scales every closure reading for the rest of the session. Rolling recovers within a
+     * minute and then keeps following the user's posture.
+     *
+     * A high percentile (p90) was tried first, on the reasoning that an open eye is the upper
+     * part of the distribution. It made things worse and was reverted: a higher reference
+     * makes every frame read *more* closed, which amplifies the confound that eye aspect ratio
+     * also falls when looking **down** (§16.3). On the distracted recording it took long
+     * closures from 2 to 6 and started firing the fatigue flag on a session where the user was
+     * merely distracted. The median sits below the look-down frames and is the robust choice.
+     */
+    const val EAR_OPEN_PERCENTILE = 50.0
+    const val EAR_OPEN_WINDOW_MS = 60_000L
+
     // ---------------------------------------------------------------- blinks
 
     /**
@@ -235,6 +257,8 @@ data class SignalConfig(
     val longClosureLevel: Double = SignalThresholds.LONG_CLOSURE_LEVEL,
     val longClosureOpenLevel: Double = SignalThresholds.LONG_CLOSURE_OPEN_LEVEL,
     val earOpenRef: Double = SignalThresholds.EAR_OPEN_REF,
+    val earOpenPercentile: Double = SignalThresholds.EAR_OPEN_PERCENTILE,
+    val earOpenWindowMs: Long = SignalThresholds.EAR_OPEN_WINDOW_MS,
     val blinkMinMs: Long = SignalThresholds.BLINK_MIN_MS,
     val blinkMaxMs: Long = SignalThresholds.BLINK_MAX_MS,
     val blinkRateWindowMs: Long = SignalThresholds.BLINK_RATE_WINDOW_MS,

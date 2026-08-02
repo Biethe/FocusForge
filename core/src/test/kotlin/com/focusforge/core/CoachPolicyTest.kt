@@ -170,6 +170,44 @@ class CoachPolicyTest {
     }
 
     @Test
+    fun `a fatigue episode that starts during the warm-up is still coached`() {
+        // Regression, from a real session (2026-08-02): the fatigue flag rose at t=46 s —
+        // 14 s before the warm-up ended — stayed up for 56% of the session, and the coach
+        // never spoke. The old rising-edge test consumed the transition while the policy was
+        // still returning null, so it could never fire afterwards.
+        val messages = run(5 * 60_000L) { t ->
+            state(t, score = 70, fatigue = t >= 46_000L)
+        }
+        val fatigue = messages.filter { it.trigger == CoachTrigger.FATIGUE }
+        assertEquals(1, fatigue.size, "expected exactly one fatigue message, got $messages")
+        assertTrue(
+            fatigue.first().elapsedMs in 60_000L..62_000L,
+            "should speak as soon as the warm-up ends, spoke at ${fatigue.first().elapsedMs} ms",
+        )
+    }
+
+    @Test
+    fun `a single fatigue episode is coached once, not repeatedly`() {
+        // The flip side: the episode tracking must not turn a sustained flag into a nag.
+        val messages = run(40 * 60_000L) { t -> state(t, score = 70, fatigue = t >= 90_000L) }
+        assertEquals(
+            1, messages.count { it.trigger == CoachTrigger.FATIGUE },
+            "one continuous episode should produce one message, got $messages",
+        )
+    }
+
+    @Test
+    fun `a second, separate fatigue episode is coached again`() {
+        val messages = run(40 * 60_000L) { t ->
+            state(t, score = 70, fatigue = t in 90_000L..150_000L || t >= 20 * 60_000L)
+        }
+        assertEquals(
+            2, messages.count { it.trigger == CoachTrigger.FATIGUE },
+            "two distinct episodes should each be coached, got $messages",
+        )
+    }
+
+    @Test
     fun `the message carries the numbers behind it`() {
         val messages = run(8 * 60_000L) { t -> state(t, score = 30) }
         val c = messages.first()

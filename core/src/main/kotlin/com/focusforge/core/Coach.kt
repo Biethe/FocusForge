@@ -102,7 +102,17 @@ class CoachPolicy(private val config: CoachConfig = CoachConfig()) {
     private val scoreSamples = ArrayDeque<Pair<Long, Int>>()
 
     private var lastMessageMs: Long? = null
-    private var previousFatigue = false
+    /**
+     * Whether the *current* fatigue episode has already been coached.
+     *
+     * This used to be a rising-edge test against the previous frame, which silently swallowed
+     * any episode that began before the warm-up ended: the edge was consumed while the policy
+     * was still returning null, so it could never fire again. A real session on 2026-08-02
+     * raised the fatigue flag at t=46 s — 14 seconds before the warm-up finished — held it for
+     * 56% of the session, and the coach never said a word. Tracking the *episode* rather than
+     * the transition fixes that class of bug rather than that one instance.
+     */
+    private var fatigueEpisodeCoached = false
     private var lowFocusSinceMs: Long? = null
     private var milestonesFired = 0
 
@@ -113,8 +123,9 @@ class CoachPolicy(private val config: CoachConfig = CoachConfig()) {
         trackScore(state)
 
         val trigger = chooseTrigger(state)
-        previousFatigue = state.fatigue
+        if (!state.fatigue) fatigueEpisodeCoached = false   // episode over; the next one counts
         if (trigger == null) return null
+        if (trigger == CoachTrigger.FATIGUE) fatigueEpisodeCoached = true
 
         lastMessageMs = state.elapsedMs
         return CoachContext(
@@ -140,7 +151,7 @@ class CoachPolicy(private val config: CoachConfig = CoachConfig()) {
             return null
         }
 
-        val fatigueRose = state.fatigue && !previousFatigue
+        val fatigueUncoached = state.fatigue && !fatigueEpisodeCoached
         updateLowFocusClock(state)
 
         val lowFocusDue = lowFocusSinceMs?.let {
@@ -161,7 +172,7 @@ class CoachPolicy(private val config: CoachConfig = CoachConfig()) {
 
         return when {
             // Fatigue outranks everything: it is the one state with a real cost to ignoring.
-            fatigueRose -> CoachTrigger.FATIGUE
+            fatigueUncoached -> CoachTrigger.FATIGUE
             lowFocusDue -> {
                 lowFocusSinceMs = null   // start the clock again rather than repeating
                 CoachTrigger.LOW_FOCUS
@@ -200,7 +211,7 @@ class CoachPolicy(private val config: CoachConfig = CoachConfig()) {
         recentScoreSum = 0.0
         recentScoreWeight = 0L
         lastMessageMs = null
-        previousFatigue = false
+        fatigueEpisodeCoached = false
         lowFocusSinceMs = null
         milestonesFired = 0
     }

@@ -13,3 +13,4 @@ Landmark recordings, which *can* be replayed frame by frame, live in `bench/repl
 | file | what it is |
 |---|---|
 | `session-sm-a202f-20260731-185007.json` | The 64 s session that reported 0 blinks and started the Phase 4.5 investigation. Recorded with app 0.4.0-phase4, before `earOpen` was added to the export. |
+| `session-sm-a202f-20260802-155732.json` | First session with the coach (0.5.3). Found two bugs at once: the coach never spoke despite the fatigue flag being up for 56% of the session, and `earOpen` calibrated to 0.188 against a true ~0.28. Both fixed in 0.5.4; both have regression tests. This file is why the `earOpen` column was added to the export. |
